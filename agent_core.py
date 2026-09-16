@@ -902,12 +902,14 @@ def launch_chrome_cdp(target_url: Optional[str] = None) -> tuple[bool, str]:
     import urllib.request
     import urllib.parse
     import json
+    import logging
 
+    _log = logging.getLogger("agent_core")
     bat_path = r"D:\install\CODE\AntigravityTelegramBot\AI_LIVE\start_chrome.bat"
     if not os.path.exists(bat_path):
         return False, f"Không tìm thấy file batch: {bat_path}"
 
-    url_to_open = target_url or "https://www.youtube.com"
+    url_to_open = target_url or "about:blank"
 
     # Kiểm tra xem Chrome và cổng 9222 đã hoạt động hay chưa
     already_running = False
@@ -918,17 +920,19 @@ def launch_chrome_cdp(target_url: Optional[str] = None) -> tuple[bool, str]:
     except Exception:
         already_running = False
 
-    if already_running and target_url:
+    if already_running:
+        if not target_url:
+            return True, "CHROME_ALREADY_RUNNING"
         # Chrome đã bật: mở tab trong cửa sổ hiện tại
         try:
             req_url = f"http://127.0.0.1:9222/json/new?{urllib.parse.quote(target_url, safe=':/?&=%')}"
             req = urllib.request.Request(req_url, method="PUT")
             with urllib.request.urlopen(req, timeout=2) as resp:
                 data = json.loads(resp.read().decode())
-                logger.info(f"Đã mở tab video qua CDP: {data.get('url')}")
+                _log.info(f"Đã mở tab video qua CDP: {data.get('url')}")
             return True, "CDP_NAVIGATED"
         except Exception as e:
-            logger.warning(f"Lỗi navigate tab qua CDP: {e}")
+            _log.warning(f"Lỗi navigate tab qua CDP: {e}")
 
     # Nếu chưa chạy: chạy file start_chrome.bat và truyền thẳng URL vào để chỉ mở DUY NHẤT 1 CỬA SỔ
     try:
@@ -1022,14 +1026,15 @@ def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
         if not valid_videos:
             chosen = random.choice(BACKUP_YOUTH_MUSIC_VIDEOS)
             chosen_title = chosen["title"]
-            chosen_url = f"https://www.youtube.com/watch?v={chosen['id']}"
+            base_url = f"https://www.youtube.com/watch?v={chosen['id']}"
             chosen_channel = chosen.get("channel", "YouTube")
         else:
             chosen = random.choice(valid_videos)
             chosen_title = chosen["title"]
-            chosen_url = chosen["url"]
+            base_url = chosen["url"]
             chosen_channel = chosen.get("channel", "YouTube")
 
+        chosen_url = f"{base_url}&autoplay=1" if "autoplay=" not in base_url else base_url
         ok, res = launch_chrome_cdp(chosen_url)
         if ok:
             return (

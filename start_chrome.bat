@@ -20,9 +20,9 @@ if not exist "%CHROME_PATH%" set "CHROME_PATH=%LOCALAPPDATA%\Google\Chrome\Appli
 set "USER_DATA_DIR=C:\chrome-debug-profile"
 
 set "TARGET_URL=%~1"
-if "%TARGET_URL%"=="" set "TARGET_URL=https://www.youtube.com"
+if "%TARGET_URL%"=="" set "TARGET_URL=about:blank"
 
-start "" "%CHROME_PATH%" --remote-debugging-port=9222 --remote-allow-origins=* --user-data-dir="%USER_DATA_DIR%" --no-first-run "%TARGET_URL%"
+start "" "%CHROME_PATH%" --remote-debugging-port=9222 --remote-allow-origins=* --user-data-dir="%USER_DATA_DIR%" --no-first-run --autoplay-policy=no-user-gesture-required "%TARGET_URL%"
 
 echo.
 echo [OK] Chrome da mo thanh cong o che do Remote Debugging!
