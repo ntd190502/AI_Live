@@ -2547,9 +2547,9 @@ class AntigravitySession:
 
 THINKING_BUDGET_MAP = {
     "minimal": 1024,
-    "low": 8192,
-    "medium": 16384,
-    "high": 32768,
+    "low": 1024,
+    "medium": 8192,
+    "high": 16384,
 }
 
 FAST_PATH_RULES = [

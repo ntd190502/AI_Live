@@ -180,7 +180,8 @@ async def safe_send_json(ws: WebSocket, payload: dict) -> bool:
     try:
         await ws.send_json(payload)
         return True
-    except (WebSocketDisconnect, RuntimeError, Exception):
+    except Exception as ex:
+        logger.warning(f"safe_send_json error ({type(ex).__name__}): {ex}")
         return False
 
 @app.websocket("/ws/live")
@@ -254,6 +255,19 @@ async def websocket_live_endpoint(websocket: WebSocket):
                 accumulated_text = []
                 client_disconnected = False
                 turn_start = time.time()
+                
+                # Keepalive heartbeat to prevent iOS URLSession 30s timeout
+                keepalive_active = True
+                async def heartbeat_worker():
+                    while keepalive_active:
+                        try:
+                            await asyncio.sleep(2.0)
+                            if keepalive_active:
+                                await safe_send_json(websocket, {"type": "ping"})
+                        except Exception:
+                            break
+
+                heartbeat_task = asyncio.create_task(heartbeat_worker())
                 try:
                     async for event_type, data in run_agent_turn(
                         session=session,
@@ -341,6 +355,9 @@ async def websocket_live_endpoint(websocket: WebSocket):
                     logger.error(f"Lỗi trong quá trình xử lý agent turn: {ex}", exc_info=True)
                     await safe_send_json(websocket, {"type": "error", "message": f"Lỗi Agent: {str(ex)}"})
                     break
+                finally:
+                    keepalive_active = False
+                    heartbeat_task.cancel()
 
     except WebSocketDisconnect:
         logger.info("iOS Client đã ngắt kết nối WebSocket.")

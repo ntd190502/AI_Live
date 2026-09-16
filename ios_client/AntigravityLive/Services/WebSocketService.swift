@@ -25,6 +25,9 @@ class WebSocketService: NSObject, URLSessionWebSocketDelegate {
     private override init() {
         super.init()
         let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 120.0
+        config.timeoutIntervalForResource = 600.0
+        config.waitsForConnectivity = true
         self.urlSession = URLSession(configuration: config, delegate: self, delegateQueue: OperationQueue())
     }
     
@@ -197,6 +200,10 @@ class WebSocketService: NSObject, URLSessionWebSocketDelegate {
             let fullText = obj["full_text"] as? String ?? ""
             notifyListeners { $0.webSocketDidCompleteTurn(fullText: fullText) }
             
+        case "ping", "pong":
+            // Heartbeat packet from server, socket is alive
+            break
+            
         case "error":
             let msg = obj["message"] as? String ?? "Lỗi không xác định"
             notifyListeners { $0.webSocketDidReceiveError(msg) }
@@ -208,9 +215,15 @@ class WebSocketService: NSObject, URLSessionWebSocketDelegate {
     
     private func startHeartbeat() {
         pingTimer?.invalidate()
-        pingTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
-            self?.sendJSON(["type": "ping"])
+        let timer = Timer(timeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.webSocketTask?.sendPing { error in
+                if let error = error {
+                    print("[WebSocket] Ping error: \(error.localizedDescription)")
+                }
+            }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        self.pingTimer = timer
     }
     
     private func stopHeartbeat() {
