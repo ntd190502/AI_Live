@@ -815,50 +815,50 @@ YOUTH_MUSIC_PLAYLISTS = [
 ]
 
 def launch_chrome_cdp(target_url: Optional[str] = None) -> tuple[bool, str]:
-    """Khởi động Google Chrome chế độ điều khiển (CDP port 9222) và profile C:\\chrome-debug-profile.
-    Tự động quét đường dẫn Chrome, dọn sạch tiến trình Chrome cũ và mở cửa sổ trực tiếp lên màn hình."""
+    """Khởi động Google Chrome thông qua file script start_chrome.bat và thực hiện kết nối điều khiển CDP Port 9222."""
     import os
     import time
+    import urllib.request
+    import urllib.parse
+    import json
 
-    local_app = os.environ.get("LOCALAPPDATA", "")
-    candidates = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.join(local_app, r"Google\Chrome\Application\chrome.exe") if local_app else "",
-    ]
-    chrome_path = None
-    for c in candidates:
-        if c and os.path.exists(c):
-            chrome_path = c
-            break
-    if not chrome_path:
-        chrome_path = "chrome.exe"
+    bat_path = r"D:\install\CODE\AntigravityTelegramBot\AI_LIVE\start_chrome.bat"
+    if not os.path.exists(bat_path):
+        return False, f"Không tìm thấy file batch: {bat_path}"
 
     try:
-        subprocess.run("taskkill /F /IM chrome.exe /T", shell=True, capture_output=True, text=True)
-        time.sleep(1.5)
+        subprocess.Popen([bat_path], shell=True)
     except Exception as e:
-        logger.warning(f"Lỗi khi taskkill Chrome: {e}")
+        return False, f"Lỗi khi khởi chạy file start_chrome.bat: {str(e)}"
 
-    user_data_dir = r"C:\chrome-debug-profile"
-    os.makedirs(user_data_dir, exist_ok=True)
+    # Chờ Chrome và CDP port 9222 sẵn sàng
+    time.sleep(3.0)
 
-    args = [
-        chrome_path,
-        "--remote-debugging-port=9222",
-        "--remote-allow-origins=*",
-        f"--user-data-dir={user_data_dir}",
-        "--no-first-run",
-        "--no-default-browser-check",
-    ]
+    cdp_connected = False
+    for _ in range(6):
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=2) as resp:
+                if resp.status == 200:
+                    cdp_connected = True
+                    break
+        except Exception:
+            time.sleep(1.0)
+
+    if not cdp_connected:
+        return False, "Đã chạy start_chrome.bat nhưng không thể kết nối tới CDP Port 9222 sau 8 giây."
+
+    # Nếu có target_url (ví dụ link YouTube), mở tab mới qua CDP API
     if target_url:
-        args.append(target_url)
+        try:
+            req_url = f"http://127.0.0.1:9222/json/new?{urllib.parse.quote(target_url, safe=':/?&=%')}"
+            req = urllib.request.Request(req_url, method="PUT")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode())
+                logger.info(f"CDP mở tab thành công: {data.get('url')}")
+        except Exception as e:
+            logger.warning(f"Lỗi khi mở URL qua CDP: {e}")
 
-    try:
-        subprocess.Popen(args)
-        return True, chrome_path
-    except Exception as e:
-        return False, str(e)
+    return True, "CDP_9222_CONNECTED"
 
 def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
     """Executes smart PC orchestration commands safely without intrusive popups."""
