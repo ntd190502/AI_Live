@@ -843,10 +843,19 @@ def launch_chrome_cdp(target_url: Optional[str] = None) -> tuple[bool, str]:
     user_data_dir = r"C:\chrome-debug-profile"
     os.makedirs(user_data_dir, exist_ok=True)
 
-    url_part = f' "{target_url}"' if target_url else ""
-    cmd = f'start "" "{chrome_path}" --remote-debugging-port=9222 --user-data-dir="{user_data_dir}"{url_part}'
+    args = [
+        chrome_path,
+        "--remote-debugging-port=9222",
+        "--remote-allow-origins=*",
+        f"--user-data-dir={user_data_dir}",
+        "--no-first-run",
+        "--no-default-browser-check",
+    ]
+    if target_url:
+        args.append(target_url)
+
     try:
-        subprocess.Popen(cmd, shell=True)
+        subprocess.Popen(args)
         return True, chrome_path
     except Exception as e:
         return False, str(e)
