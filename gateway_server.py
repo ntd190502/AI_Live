@@ -8,6 +8,13 @@ Enables real-time duplex live voice calls and multimedia messaging from iOS (Tro
 
 import os
 import sys
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 import json
 import time
 import base64
@@ -311,10 +318,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print("=" * 60)
-    print(f"🚀 Antigravity Live Gateway đang khởi động...")
-    print(f"🌐 Lắng nghe trên: http://{args.host}:{args.port}")
-    print(f"📡 WebSocket Live Endpoint: ws://{args.host}:{args.port}/ws/live")
-    print(f"🩺 Health check: http://{args.host}:{args.port}/health")
+    print(f"[*] Antigravity Live Gateway dang khoi dong...")
+    print(f"[*] Lang nghe tren: http://{args.host}:{args.port}")
+    print(f"[*] WebSocket Live: ws://{args.host}:{args.port}/ws/live")
+    print(f"[*] Health check:   http://{args.host}:{args.port}/health")
     print("=" * 60)
 
     uvicorn.run(app, host=args.host, port=args.port)
