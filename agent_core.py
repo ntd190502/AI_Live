@@ -806,13 +806,80 @@ def manage_user_memory(action: str, key: Optional[str] = None, value: Optional[s
     else:
         return f"Error: Hành động '{action}' không hợp lệ. Chọn 'remember', 'forget', 'get', hoặc 'list'."
 
-YOUTH_MUSIC_PLAYLISTS = [
-    {"title": "Top Nhạc Trẻ Gây Nghiện Mới Nhất", "url": "https://www.youtube.com/watch?v=1F3y6rUqFvY"},
-    {"title": "V-Pop Acoustic Chill Buổi Tối", "url": "https://www.youtube.com/watch?v=kXYiU_JCYtU"},
-    {"title": "Nhạc Trẻ Ballad Tâm Trạng Hay Nhất", "url": "https://www.youtube.com/watch?v=kJQP7kiw5Fk"},
-    {"title": "Chill Hits Lofi Nhạc Trẻ Thư Giãn", "url": "https://www.youtube.com/watch?v=0k7b3jYl1b4"},
-    {"title": "Playlist Nhạc Trẻ Hot TikTok Thịnh Hành", "url": "https://www.youtube.com/results?search_query=list+nhac+tre+moi+nhat&sp=EgIQAw%253D%253D"}
+POPULAR_MUSIC_SEARCH_QUERIES = [
+    "nhạc trẻ hot tiktok mới nhất",
+    "nhạc trẻ ballad tâm trạng gây nghiện",
+    "nhạc trẻ chill lofi thư giãn",
+    "nhạc việt acoustic nhẹ nhàng",
+    "nhạc trẻ remix bass cực căng edm",
+    "top bài hát v-pop thịnh hành",
+    "nhạc trẻ gây nghiện mới nhất triệu view",
+    "nhạc chill buồn tâm trạng v-pop",
 ]
+
+def search_youtube_videos(query: str, limit: int = 15) -> list[dict]:
+    """Tìm kiếm video trực tiếp trên YouTube và trích xuất danh sách video (id, title, channel, url)."""
+    import urllib.request
+    import urllib.parse
+    import re
+    import json
+
+    encoded_query = urllib.parse.quote(query)
+    url = f"https://www.youtube.com/results?search_query={encoded_query}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7"
+    }
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        logger.warning(f"Lỗi khi tìm kiếm YouTube: {e}")
+        return []
+
+    results = []
+    pattern = r"var ytInitialData = ({.*?});</script>"
+    match = re.search(pattern, html)
+    if not match:
+        pattern = r"window\[\"ytInitialData\"\] = ({.*?});</script>"
+        match = re.search(pattern, html)
+
+    if match:
+        try:
+            data = json.loads(match.group(1))
+            contents = data.get("contents", {}).get("twoColumnSearchResultsRenderer", {}).get("primaryContents", {}).get("sectionListRenderer", {}).get("contents", [])
+            for section in contents:
+                item_section = section.get("itemSectionRenderer", {})
+                for item in item_section.get("contents", []):
+                    vr = item.get("videoRenderer")
+                    if vr:
+                        vid_id = vr.get("videoId")
+                        title = vr.get("title", {}).get("runs", [{}])[0].get("text", "")
+                        channel = vr.get("ownerText", {}).get("runs", [{}])[0].get("text", "")
+                        if vid_id and title:
+                            results.append({
+                                "id": vid_id,
+                                "title": title,
+                                "channel": channel or "YouTube",
+                                "url": f"https://www.youtube.com/watch?v={vid_id}"
+                            })
+                            if len(results) >= limit:
+                                break
+        except Exception as e:
+            logger.warning(f"Lỗi phân tích ytInitialData: {e}")
+
+    if not results:
+        raw_ids = list(dict.fromkeys(re.findall(r"\"videoId\":\"([a-zA-Z0-9_-]{11})\"", html)))
+        for vid_id in raw_ids[:limit]:
+            results.append({
+                "id": vid_id,
+                "title": f"Video YouTube ({vid_id})",
+                "channel": "YouTube",
+                "url": f"https://www.youtube.com/watch?v={vid_id}"
+            })
+
+    return results
 
 def launch_chrome_cdp(target_url: Optional[str] = None) -> tuple[bool, str]:
     """Khởi động Google Chrome thông qua file script start_chrome.bat và thực hiện kết nối điều khiển CDP Port 9222."""
@@ -914,12 +981,31 @@ def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
 
     elif action in ("open_music", "play_music", "music"):
         import random
-        chosen = random.choice(YOUTH_MUSIC_PLAYLISTS)
-        m_title = chosen["title"]
-        m_url = chosen["url"]
-        ok, res = launch_chrome_cdp(m_url)
+        if target and target.strip().lower() not in ("music", "nhạc", "nhac", "bai hat", "bài hát"):
+            search_query = f"{target.strip()} nhạc"
+        else:
+            search_query = random.choice(POPULAR_MUSIC_SEARCH_QUERIES)
+
+        videos = search_youtube_videos(search_query, limit=15)
+        if not videos:
+            chosen_title = "Nhạc Trẻ Mới Nhất Thịnh Hành"
+            chosen_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(search_query)}"
+            chosen_channel = "YouTube Search"
+        else:
+            chosen = random.choice(videos)
+            chosen_title = chosen["title"]
+            chosen_url = chosen["url"]
+            chosen_channel = chosen.get("channel", "YouTube")
+
+        ok, res = launch_chrome_cdp(chosen_url)
         if ok:
-            return f"🎵 Đã mở ngẫu nhiên: **{m_title}** trên Google Chrome (Cổng AI CDP: 9222, Profile: `C:\\chrome-debug-profile`)!\n🔗 `{m_url}`\n\n*(AI đã sẵn sàng kết nối cổng 9222 để điều khiển dừng/phát hoặc đổi bài theo yêu cầu)*"
+            return (
+                f"🎵 Đã tìm kiếm: *\"{search_query}\"*\n"
+                f"🎲 Đã chọn ngẫu nhiên: **{chosen_title}** ({chosen_channel})\n"
+                f"🌐 Phát trên Google Chrome (CDP: 9222)\n"
+                f"🔗 `{chosen_url}`\n\n"
+                f"*(AI đã sẵn sàng kết nối cổng 9222 để điều khiển dừng/phát hoặc đổi bài theo yêu cầu)*"
+            )
         else:
             return f"Lỗi khi mở Chrome phát nhạc: {res}"
 
