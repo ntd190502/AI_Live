@@ -1,0 +1,49 @@
+name: Build iOS IPA for TrollStore
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build AntigravityLive.ipa
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode Version
+        run: |
+          sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode_15.2.app || true
+          xcodebuild -version
+
+      - name: Build and Archive
+        run: |
+          mkdir -p build/archive
+          xcodebuild archive \
+            -project ios_client/AntigravityLive.xcodeproj \
+            -scheme AntigravityLive \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/archive/AntigravityLive.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Package IPA for TrollStore
+        run: |
+          mkdir -p build/ipa/Payload
+          cp -r build/archive/AntigravityLive.xcarchive/Products/Applications/AntigravityLive.app build/ipa/Payload/
+          cd build/ipa
+          zip -r ../../AntigravityLive.ipa Payload
+          cd ../..
+          ls -lh AntigravityLive.ipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AntigravityLive-TrollStore-IPA
+          path: AntigravityLive.ipa
+          retention-days: 30

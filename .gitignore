@@ -1,0 +1,18 @@
+# Sensitive auth and configuration files
+auth_token.json
+config.json
+google_client_secret.json
+*.log
+*.token
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Xcode / macOS temporary files
+.DS_Store
+*.xcuserdata
+DerivedData/
+build/
+*.xcworkspace/xcuserdata/

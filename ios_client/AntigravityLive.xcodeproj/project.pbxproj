@@ -1,0 +1,303 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		AA1000012C00000100000001 /* AntigravityLiveApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000012C00000100000001 /* AntigravityLiveApp.swift */; };
+		AA1000022C00000100000001 /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000022C00000100000001 /* Config.swift */; };
+		AA1000032C00000100000001 /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000032C00000100000001 /* ChatMessage.swift */; };
+		AA1000042C00000100000001 /* AudioEngineManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000042C00000100000001 /* AudioEngineManager.swift */; };
+		AA1000052C00000100000001 /* WebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000052C00000100000001 /* WebSocketService.swift */; };
+		AA1000062C00000100000001 /* LiveCallViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000062C00000100000001 /* LiveCallViewModel.swift */; };
+		AA1000072C00000100000001 /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000072C00000100000001 /* ChatViewModel.swift */; };
+		AA1000082C00000100000001 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000082C00000100000001 /* MainTabView.swift */; };
+		AA1000092C00000100000001 /* LiveCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000092C00000100000001 /* LiveCallView.swift */; };
+		AA10000A2C00000100000001 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA20000A2C00000100000001 /* ChatView.swift */; };
+		AA10000B2C00000100000001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA20000B2C00000100000001 /* SettingsView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		AA0000012C00000100000001 /* AntigravityLive.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AntigravityLive.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA2000012C00000100000001 /* AntigravityLiveApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityLiveApp.swift; sourceTree = "<group>"; };
+		AA2000022C00000100000001 /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
+		AA2000032C00000100000001 /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
+		AA2000042C00000100000001 /* AudioEngineManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngineManager.swift; sourceTree = "<group>"; };
+		AA2000052C00000100000001 /* WebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketService.swift; sourceTree = "<group>"; };
+		AA2000062C00000100000001 /* LiveCallViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCallViewModel.swift; sourceTree = "<group>"; };
+		AA2000072C00000100000001 /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
+		AA2000082C00000100000001 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
+		AA2000092C00000100000001 /* LiveCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCallView.swift; sourceTree = "<group>"; };
+		AA20000A2C00000100000001 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		AA20000B2C00000100000001 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		AA20000C2C00000100000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		AA3000012C00000100000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		AA4000012C00000100000001 = {
+			isa = PBXGroup;
+			children = (
+				AA4000022C00000100000001 /* AntigravityLive */,
+				AA4000082C00000100000001 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		AA4000022C00000100000001 /* AntigravityLive */ = {
+			isa = PBXGroup;
+			children = (
+				AA4000032C00000100000001 /* App */,
+				AA4000042C00000100000001 /* Models */,
+				AA4000052C00000100000001 /* Services */,
+				AA4000062C00000100000001 /* ViewModels */,
+				AA4000072C00000100000001 /* Views */,
+				AA20000C2C00000100000001 /* Info.plist */,
+			);
+			path = AntigravityLive;
+			sourceTree = "<group>";
+		};
+		AA4000032C00000100000001 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				AA2000012C00000100000001 /* AntigravityLiveApp.swift */,
+				AA2000022C00000100000001 /* Config.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		AA4000042C00000100000001 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				AA2000032C00000100000001 /* ChatMessage.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		AA4000052C00000100000001 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				AA2000042C00000100000001 /* AudioEngineManager.swift */,
+				AA2000052C00000100000001 /* WebSocketService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		AA4000062C00000100000001 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				AA2000062C00000100000001 /* LiveCallViewModel.swift */,
+				AA2000072C00000100000001 /* ChatViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		AA4000072C00000100000001 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				AA2000082C00000100000001 /* MainTabView.swift */,
+				AA2000092C00000100000001 /* LiveCallView.swift */,
+				AA20000A2C00000100000001 /* ChatView.swift */,
+				AA20000B2C00000100000001 /* SettingsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		AA4000082C00000100000001 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000012C00000100000001 /* AntigravityLive.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AA5000012C00000100000001 /* AntigravityLive */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA6000012C00000100000001 /* Build configuration list for PBXNativeTarget "AntigravityLive" */;
+			buildPhases = (
+				AA7000012C00000100000001 /* Sources */,
+				AA3000012C00000100000001 /* Frameworks */,
+				AA8000012C00000100000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AntigravityLive;
+			productName = AntigravityLive;
+			productReference = AA0000012C00000100000001 /* AntigravityLive.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AA9000012C00000100000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					AA5000012C00000100000001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = AA6000022C00000100000001 /* Build configuration list for PBXProject "AntigravityLive" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = AA4000012C00000100000001;
+			productRefGroup = AA4000082C00000100000001 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AA5000012C00000100000001 /* AntigravityLive */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		AA8000012C00000100000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		AA7000012C00000100000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA1000012C00000100000001 /* AntigravityLiveApp.swift in Sources */,
+				AA1000022C00000100000001 /* Config.swift in Sources */,
+				AA1000032C00000100000001 /* ChatMessage.swift in Sources */,
+				AA1000042C00000100000001 /* AudioEngineManager.swift in Sources */,
+				AA1000052C00000100000001 /* WebSocketService.swift in Sources */,
+				AA1000062C00000100000001 /* LiveCallViewModel.swift in Sources */,
+				AA1000072C00000100000001 /* ChatViewModel.swift in Sources */,
+				AA1000082C00000100000001 /* MainTabView.swift in Sources */,
+				AA1000092C00000100000001 /* LiveCallView.swift in Sources */,
+				AA10000A2C00000100000001 /* ChatView.swift in Sources */,
+				AA10000B2C00000100000001 /* SettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		AAB000012C00000100000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "-";
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AntigravityLive/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.antigravity.live;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AAB000022C00000100000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "-";
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AntigravityLive/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.antigravity.live;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		AAB000032C00000100000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				SDKROOT = iphoneos;
+			};
+			name = Debug;
+		};
+		AAB000042C00000100000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				SDKROOT = iphoneos;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AA6000012C00000100000001 /* Build configuration list for PBXNativeTarget "AntigravityLive" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AAB000012C00000100000001 /* Debug */,
+				AAB000022C00000100000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA6000022C00000100000001 /* Build configuration list for PBXProject "AntigravityLive" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AAB000032C00000100000001 /* Debug */,
+				AAB000042C00000100000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = AA9000012C00000100000001 /* Project object */;
+}
