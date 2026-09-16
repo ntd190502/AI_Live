@@ -16,8 +16,7 @@ protocol WebSocketServiceDelegate: AnyObject {
 class WebSocketService: NSObject, URLSessionWebSocketDelegate {
     static let shared = WebSocketService()
     
-    weak var delegate: WebSocketServiceDelegate?
-    
+    private var listeners = NSHashTable<AnyObject>.weakObjects()
     private var webSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession?
     private var pingTimer: Timer?
@@ -29,11 +28,33 @@ class WebSocketService: NSObject, URLSessionWebSocketDelegate {
         self.urlSession = URLSession(configuration: config, delegate: self, delegateQueue: OperationQueue())
     }
     
+    func addListener(_ listener: WebSocketServiceDelegate) {
+        listeners.add(listener as AnyObject)
+    }
+    
+    func removeListener(_ listener: WebSocketServiceDelegate) {
+        listeners.remove(listener as AnyObject)
+    }
+    
+    private func notifyListeners(_ action: @escaping (WebSocketServiceDelegate) -> Void) {
+        DispatchQueue.main.async {
+            for item in self.listeners.allObjects {
+                if let listener = item as? WebSocketServiceDelegate {
+                    action(listener)
+                }
+            }
+        }
+    }
+    
     func connect() {
+        if isConnected && webSocketTask != nil {
+            return // Already connected, avoid reconnecting
+        }
+        
         disconnect()
         
         guard let url = AppConfig.wsLiveURL else {
-            delegate?.webSocketDidReceiveError("Địa chỉ WebSocket không hợp lệ!")
+            notifyListeners { $0.webSocketDidReceiveError("Địa chỉ WebSocket không hợp lệ!") }
             return
         }
         
@@ -115,7 +136,7 @@ class WebSocketService: NSObject, URLSessionWebSocketDelegate {
             case .failure(let error):
                 DispatchQueue.main.async {
                     self.isConnected = false
-                    self.delegate?.webSocketDidDisconnect(error: error)
+                    self.notifyListeners { $0.webSocketDidDisconnect(error: error) }
                 }
             case .success(let message):
                 switch message {
@@ -143,47 +164,45 @@ class WebSocketService: NSObject, URLSessionWebSocketDelegate {
         
         let type = obj["type"] as? String ?? ""
         
-        DispatchQueue.main.async {
-            switch type {
-            case "status":
-                let text = obj["text"] as? String ?? ""
-                self.delegate?.webSocketDidReceiveStatus(text)
-                
-            case "text_delta":
-                let delta = obj["delta"] as? String ?? ""
-                self.delegate?.webSocketDidReceiveTextDelta(delta)
-                
-            case "tool_executed":
-                let tool = obj["tool"] as? String ?? ""
-                let output = obj["output"] as? String ?? ""
-                self.delegate?.webSocketDidReceiveToolOutput(tool: tool, output: output)
-                
-            case "voice_chunk":
-                if let b64 = obj["audio_b64"] as? String,
-                   let audioData = Data(base64Encoded: b64) {
-                    let fullText = obj["full_text"] as? String ?? ""
-                    self.delegate?.webSocketDidReceiveVoiceChunk(audioData: audioData, fullText: fullText)
-                }
-                
-            case "screenshot":
-                if let b64 = obj["image_b64"] as? String,
-                   let imgData = Data(base64Encoded: b64),
-                   let image = UIImage(data: imgData) {
-                    let caption = obj["caption"] as? String ?? ""
-                    self.delegate?.webSocketDidReceiveScreenshot(image: image, caption: caption)
-                }
-                
-            case "turn_complete":
+        switch type {
+        case "status":
+            let text = obj["text"] as? String ?? ""
+            notifyListeners { $0.webSocketDidReceiveStatus(text) }
+            
+        case "text_delta":
+            let delta = obj["delta"] as? String ?? ""
+            notifyListeners { $0.webSocketDidReceiveTextDelta(delta) }
+            
+        case "tool_executed":
+            let tool = obj["tool"] as? String ?? ""
+            let output = obj["output"] as? String ?? ""
+            notifyListeners { $0.webSocketDidReceiveToolOutput(tool: tool, output: output) }
+            
+        case "voice_chunk":
+            if let b64 = obj["audio_b64"] as? String,
+               let audioData = Data(base64Encoded: b64) {
                 let fullText = obj["full_text"] as? String ?? ""
-                self.delegate?.webSocketDidCompleteTurn(fullText: fullText)
-                
-            case "error":
-                let msg = obj["message"] as? String ?? "Lỗi không xác định"
-                self.delegate?.webSocketDidReceiveError(msg)
-                
-            default:
-                break
+                notifyListeners { $0.webSocketDidReceiveVoiceChunk(audioData: audioData, fullText: fullText) }
             }
+            
+        case "screenshot":
+            if let b64 = obj["image_b64"] as? String,
+               let imgData = Data(base64Encoded: b64),
+               let image = UIImage(data: imgData) {
+                let caption = obj["caption"] as? String ?? ""
+                notifyListeners { $0.webSocketDidReceiveScreenshot(image: image, caption: caption) }
+            }
+            
+        case "turn_complete":
+            let fullText = obj["full_text"] as? String ?? ""
+            notifyListeners { $0.webSocketDidCompleteTurn(fullText: fullText) }
+            
+        case "error":
+            let msg = obj["message"] as? String ?? "Lỗi không xác định"
+            notifyListeners { $0.webSocketDidReceiveError(msg) }
+            
+        default:
+            break
         }
     }
     
@@ -203,14 +222,14 @@ class WebSocketService: NSObject, URLSessionWebSocketDelegate {
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         DispatchQueue.main.async {
             self.isConnected = true
-            self.delegate?.webSocketDidConnect()
+            self.notifyListeners { $0.webSocketDidConnect() }
         }
     }
     
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         DispatchQueue.main.async {
             self.isConnected = false
-            self.delegate?.webSocketDidDisconnect(error: nil)
+            self.notifyListeners { $0.webSocketDidDisconnect(error: nil) }
         }
     }
 }

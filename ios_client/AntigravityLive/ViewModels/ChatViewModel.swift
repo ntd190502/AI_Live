@@ -21,7 +21,7 @@ class ChatViewModel: ObservableObject, WebSocketServiceDelegate {
     }
     
     func bindWebSocket() {
-        wsService.delegate = self
+        wsService.addListener(self)
         if !wsService.isConnected {
             wsService.connect()
         }

@@ -176,6 +176,13 @@ async def chat_api(req: ChatRequest):
         "status_updates": status_updates
     }
 
+async def safe_send_json(ws: WebSocket, payload: dict) -> bool:
+    try:
+        await ws.send_json(payload)
+        return True
+    except (WebSocketDisconnect, RuntimeError, Exception):
+        return False
+
 @app.websocket("/ws/live")
 async def websocket_live_endpoint(websocket: WebSocket):
     """
@@ -239,10 +246,11 @@ async def websocket_live_endpoint(websocket: WebSocket):
                     audio_b64=audio_b64,
                     audio_mime=audio_mime
                 )
-
-                await websocket.send_json({"type": "status", "text": "Antigravity đang xử lý..."})
+                if not await safe_send_json(websocket, {"type": "status", "text": "Antigravity đang xử lý..."}):
+                    continue
 
                 accumulated_text = []
+                client_disconnected = False
                 try:
                     async for event_type, data in run_agent_turn(
                         session=session,
@@ -250,16 +258,22 @@ async def websocket_live_endpoint(websocket: WebSocket):
                         thinking_level="medium"
                     ):
                         if event_type == "status":
-                            await websocket.send_json({"type": "status", "text": str(data)})
+                            if not await safe_send_json(websocket, {"type": "status", "text": str(data)}):
+                                client_disconnected = True
+                                break
                         elif event_type == "text":
                             accumulated_text.append(data)
-                            await websocket.send_json({"type": "text_delta", "delta": data})
+                            if not await safe_send_json(websocket, {"type": "text_delta", "delta": data}):
+                                client_disconnected = True
+                                break
                         elif event_type == "tool_output":
-                            await websocket.send_json({
+                            if not await safe_send_json(websocket, {
                                 "type": "tool_executed",
                                 "tool": data.get("tool"),
                                 "output": str(data.get("output"))[:1000]
-                            })
+                            }):
+                                client_disconnected = True
+                                break
                         elif event_type == "send_file":
                             f_path = data.get("path")
                             caption = data.get("caption", "")
@@ -267,27 +281,35 @@ async def websocket_live_endpoint(websocket: WebSocket):
                                 try:
                                     with open(f_path, "rb") as f:
                                         img_b64 = base64.b64encode(f.read()).decode("utf-8")
-                                    await websocket.send_json({
+                                    if not await safe_send_json(websocket, {
                                         "type": "screenshot",
                                         "image_b64": img_b64,
                                         "caption": caption
-                                    })
+                                    }):
+                                        client_disconnected = True
+                                        break
                                 except Exception as fe:
                                     logger.warning(f"Lỗi đọc file gửi: {fe}")
                         elif event_type == "error":
-                            await websocket.send_json({"type": "error", "message": str(data)})
+                            await safe_send_json(websocket, {"type": "error", "message": str(data)})
+                            client_disconnected = True
+                            break
+
+                    if client_disconnected:
+                        logger.info("iOS Client đã ngắt kết nối trong lúc truyền dữ liệu.")
+                        continue
 
                     final_full_text = "".join(accumulated_text).strip()
 
                     # In Live Mode, synthesize Hoài My Voice and push to iOS
                     if is_live_call and final_full_text:
-                        await websocket.send_json({"type": "status", "text": "Đang tổng hợp giọng nói Hoài My..."})
+                        await safe_send_json(websocket, {"type": "status", "text": "Đang tổng hợp giọng nói Hoài My..."})
                         try:
                             voice_path = await generate_vietnamese_voice(final_full_text)
                             if voice_path and voice_path.exists():
                                 with open(voice_path, "rb") as vf:
                                     v_b64 = base64.b64encode(vf.read()).decode("utf-8")
-                                await websocket.send_json({
+                                await safe_send_json(websocket, {
                                     "type": "voice_chunk",
                                     "audio_b64": v_b64,
                                     "mime": "audio/mp3",
@@ -296,14 +318,17 @@ async def websocket_live_endpoint(websocket: WebSocket):
                         except Exception as ve:
                             logger.error(f"Lỗi tạo voice TTS: {ve}")
 
-                    await websocket.send_json({
+                    await safe_send_json(websocket, {
                         "type": "turn_complete",
                         "full_text": final_full_text
                     })
 
+                except (WebSocketDisconnect, RuntimeError):
+                    logger.info("iOS Client đã ngắt kết nối WebSocket.")
+                    break
                 except Exception as ex:
                     logger.error(f"Lỗi trong quá trình xử lý agent turn: {ex}", exc_info=True)
-                    await websocket.send_json({"type": "error", "message": f"Lỗi Agent: {str(ex)}"})
+                    await safe_send_json(websocket, {"type": "error", "message": f"Lỗi Agent: {str(ex)}"})
 
     except WebSocketDisconnect:
         logger.info("iOS Client đã ngắt kết nối WebSocket.")

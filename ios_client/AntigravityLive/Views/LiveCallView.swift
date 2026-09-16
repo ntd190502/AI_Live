@@ -154,10 +154,7 @@ struct LiveCallView: View {
             }
         }
         .onAppear {
-            viewModel.connect()
-        }
-        .onDisappear {
-            viewModel.disconnect()
+            viewModel.onAppear()
         }
     }
 }

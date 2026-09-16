@@ -23,13 +23,29 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
     private var cancellables = Set<AnyCancellable>()
     
     init() {
-        wsService.delegate = self
+        wsService.addListener(self)
+        if wsService.isConnected {
+            callState = .idle
+            statusSubtitle = "Sẵn sàng"
+        }
         
         // Sync audio levels from engine to UI
         audioEngine.$audioLevel
             .receive(on: DispatchQueue.main)
             .assign(to: \.audioLevel, on: self)
             .store(in: &cancellables)
+    }
+    
+    func onAppear() {
+        wsService.addListener(self)
+        if wsService.isConnected {
+            if callState == .disconnected {
+                callState = .idle
+                statusSubtitle = "Sẵn sàng. Giữ nút để nói."
+            }
+        } else {
+            connect()
+        }
     }
     
     func connect() {
