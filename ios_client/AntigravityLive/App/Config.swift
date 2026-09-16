@@ -1,4 +1,10 @@
 import Foundation
+import SwiftUI
+
+extension Color {
+    // Backport Color.cyan for iOS 14.0+ compatibility
+    static let cyan = Color(red: 0.0, green: 0.78, blue: 0.95)
+}
 
 struct AppConfig {
     static let appName = "Antigravity Live"
