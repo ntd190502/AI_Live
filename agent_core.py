@@ -958,6 +958,113 @@ def launch_chrome_cdp(target_url: Optional[str] = None) -> tuple[bool, str]:
 
     return True, "CDP_9222_CONNECTED"
 
+def play_random_youtube_video_via_cdp(search_query: str) -> dict:
+    """Mở trang tìm kiếm YouTube trên Chrome, dùng CDP tự động bốc ngẫu nhiên 1 video từ vị trí 1-10 và click phát ngay lập tức."""
+    import urllib.request
+    import urllib.parse
+    import json
+    import time
+    import random
+    import websockets
+    import asyncio
+    import concurrent.futures
+
+    encoded_query = urllib.parse.quote(search_query)
+    search_url = f"https://www.youtube.com/results?search_query={encoded_query}"
+
+    # 1. Mở trang tìm kiếm trên Chrome qua start_chrome.bat
+    launch_ok, launch_msg = launch_chrome_cdp(search_url)
+    if not launch_ok:
+        return {"success": False, "error": launch_msg}
+
+    # 2. Đợi 3.5s để YouTube render danh sách video kết quả
+    time.sleep(3.5)
+
+    # 3. Lấy WebSocket URL của tab YouTube
+    target_tab = None
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:9222/json/list", timeout=3) as resp:
+            tabs = json.loads(resp.read().decode())
+            for t in tabs:
+                if t.get("type") == "page" and "youtube.com" in t.get("url", ""):
+                    target_tab = t
+                    break
+            if not target_tab and tabs:
+                for t in tabs:
+                    if t.get("type") == "page":
+                        target_tab = t
+                        break
+    except Exception as e:
+        return {"success": False, "error": f"Lỗi lấy danh sách tab CDP: {e}"}
+
+    if not target_tab or not target_tab.get("webSocketDebuggerUrl"):
+        return {"success": False, "error": "Không tìm thấy tab YouTube có cổng WebSocket CDP"}
+
+    ws_url = target_tab["webSocketDebuggerUrl"]
+    rand_idx = random.randint(0, 9)
+
+    js_code = f"""
+    (function() {{
+        var items = Array.from(document.querySelectorAll('ytd-video-renderer, ytd-rich-item-renderer'));
+        var validLinks = [];
+        for (var item of items) {{
+            var a = item.querySelector('a#video-title') || item.querySelector('a#thumbnail');
+            if (a && a.href && a.href.includes('/watch?v=')) {{
+                var titleElem = item.querySelector('#video-title');
+                var titleText = titleElem ? titleElem.innerText.trim() : a.title || 'Video';
+                validLinks.push({{ url: a.href, title: titleText }});
+            }}
+        }}
+        if (validLinks.length === 0) {{
+            var allA = Array.from(document.querySelectorAll('a[href*="/watch?v="]'));
+            for (var a of allA) {{
+                if (a.innerText.trim().length > 5) {{
+                    validLinks.push({{ url: a.href, title: a.innerText.trim() }});
+                }}
+            }}
+        }}
+        if (validLinks.length > 0) {{
+            var targetIdx = Math.min({rand_idx}, validLinks.length - 1);
+            var chosen = validLinks[targetIdx];
+            window.location.href = chosen.url;
+            return {{ success: true, chosenIndex: targetIdx + 1, totalFound: validLinks.length, title: chosen.title, url: chosen.url }};
+        }}
+        return {{ success: false, reason: 'No valid video links found' }};
+    }})()
+    """
+
+    async def _do_eval():
+        async with websockets.connect(ws_url) as ws:
+            cmd = {
+                "id": 100,
+                "method": "Runtime.evaluate",
+                "params": {
+                    "expression": js_code,
+                    "returnByValue": True
+                }
+            }
+            await ws.send(json.dumps(cmd))
+            raw_res = await ws.recv()
+            res_obj = json.loads(raw_res)
+            return res_obj.get("result", {}).get("result", {}).get("value", {})
+
+    try:
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        if loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                res_val = pool.submit(asyncio.run, _do_eval()).result()
+        else:
+            res_val = loop.run_until_complete(_do_eval())
+
+        return res_val
+    except Exception as e:
+        return {"success": False, "error": f"Lỗi CDP WebSocket Runtime.evaluate: {e}"}
+
 def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
     """Executes smart PC orchestration commands safely without intrusive popups."""
     if not IS_WINDOWS:
@@ -1016,36 +1123,25 @@ def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
     elif action in ("open_music", "play_music", "music"):
         import random
         if target and target.strip().lower() not in ("music", "nhạc", "nhac", "bai hat", "bài hát"):
-            search_query = f"{target.strip()} nhạc"
+            search_query = target.strip()
         else:
             search_query = random.choice(POPULAR_MUSIC_SEARCH_QUERIES)
 
-        videos = search_youtube_videos(search_query, limit=15)
-        valid_videos = [v for v in videos if "watch?v=" in v.get("url", "")]
-
-        if not valid_videos:
-            chosen = random.choice(BACKUP_YOUTH_MUSIC_VIDEOS)
-            chosen_title = chosen["title"]
-            base_url = f"https://www.youtube.com/watch?v={chosen['id']}"
-            chosen_channel = chosen.get("channel", "YouTube")
-        else:
-            chosen = random.choice(valid_videos)
-            chosen_title = chosen["title"]
-            base_url = chosen["url"]
-            chosen_channel = chosen.get("channel", "YouTube")
-
-        chosen_url = f"{base_url}&autoplay=1" if "autoplay=" not in base_url else base_url
-        ok, res = launch_chrome_cdp(chosen_url)
-        if ok:
+        cdp_res = play_random_youtube_video_via_cdp(search_query)
+        if cdp_res and cdp_res.get("success"):
+            chosen_idx = cdp_res.get("chosenIndex", 1)
+            title = cdp_res.get("title", "Video YouTube")
+            url = cdp_res.get("url", "")
             return (
-                f"🎵 Đã tìm kiếm: *\"{search_query}\"*\n"
-                f"▶️ Đang phát: **{chosen_title}** ({chosen_channel})\n"
-                f"🌐 Cửa sổ duy nhất trên Google Chrome (CDP: 9222)\n"
-                f"🔗 `{chosen_url}`\n\n"
-                f"*(AI đã sẵn sàng kết nối cổng 9222 để điều khiển dừng/phát hoặc đổi bài theo yêu cầu)*"
+                f"🔍 Đã tìm kiếm trên YouTube: *\"{search_query}\"*\n"
+                f"🎲 Tự động bấm vào video số #{chosen_idx} trong top 10:\n"
+                f"▶️ **{title}**\n"
+                f"🔗 `{url}`\n\n"
+                f"*(Video đang phát trực tiếp trên Google Chrome)*"
             )
         else:
-            return f"Lỗi khi mở Chrome phát nhạc: {res}"
+            err = cdp_res.get("error") if cdp_res else "Lỗi kết nối CDP"
+            return f"⚠️ Đã mở trang tìm kiếm YouTube: *\"{search_query}\"* (Không tự bấm được video: {err})"
 
     elif action in ("clean_temp", "clean_disk"):
         temp_dir = Path(tempfile.gettempdir())
