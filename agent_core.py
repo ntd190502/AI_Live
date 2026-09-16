@@ -814,6 +814,43 @@ YOUTH_MUSIC_PLAYLISTS = [
     {"title": "Playlist Nhạc Trẻ Hot TikTok Thịnh Hành", "url": "https://www.youtube.com/results?search_query=list+nhac+tre+moi+nhat&sp=EgIQAw%253D%253D"}
 ]
 
+def launch_chrome_cdp(target_url: Optional[str] = None) -> tuple[bool, str]:
+    """Khởi động Google Chrome chế độ điều khiển (CDP port 9222) và profile C:\\chrome-debug-profile.
+    Tự động quét đường dẫn Chrome, dọn sạch tiến trình Chrome cũ và mở cửa sổ trực tiếp lên màn hình."""
+    import os
+    import time
+
+    local_app = os.environ.get("LOCALAPPDATA", "")
+    candidates = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.join(local_app, r"Google\Chrome\Application\chrome.exe") if local_app else "",
+    ]
+    chrome_path = None
+    for c in candidates:
+        if c and os.path.exists(c):
+            chrome_path = c
+            break
+    if not chrome_path:
+        chrome_path = "chrome.exe"
+
+    try:
+        subprocess.run("taskkill /F /IM chrome.exe /T", shell=True, capture_output=True, text=True)
+        time.sleep(1.5)
+    except Exception as e:
+        logger.warning(f"Lỗi khi taskkill Chrome: {e}")
+
+    user_data_dir = r"C:\chrome-debug-profile"
+    os.makedirs(user_data_dir, exist_ok=True)
+
+    url_part = f' "{target_url}"' if target_url else ""
+    cmd = f'start "" "{chrome_path}" --remote-debugging-port=9222 --user-data-dir="{user_data_dir}"{url_part}'
+    try:
+        subprocess.Popen(cmd, shell=True)
+        return True, chrome_path
+    except Exception as e:
+        return False, str(e)
+
 def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
     """Executes smart PC orchestration commands safely without intrusive popups."""
     if not IS_WINDOWS:
@@ -839,14 +876,18 @@ def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
         elif "discord" in tgt:
             cmd = "start discord:"
         elif "chrome" in tgt:
-            cmd = "start chrome"
+            ok, res = launch_chrome_cdp()
+            if ok:
+                return f"🌐 Đã khởi chạy Google Chrome (Cổng AI CDP: 9222, Profile: `C:\\chrome-debug-profile`) thành công."
+            else:
+                return f"Lỗi khi mở Chrome: {res}"
         elif "edge" in tgt:
             cmd = "start msedge"
         else:
             cmd = f"start {target}"
 
         try:
-            subprocess.Popen(cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.Popen(cmd, shell=True)
             return f"🚀 Đã khởi chạy ứng dụng **{target}** thành công."
         except Exception as e:
             return f"Lỗi khi mở ứng dụng {target}: {str(e)}"
@@ -867,12 +908,11 @@ def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
         chosen = random.choice(YOUTH_MUSIC_PLAYLISTS)
         m_title = chosen["title"]
         m_url = chosen["url"]
-        cmd = f'start chrome --remote-debugging-port=9222 "{m_url}"'
-        try:
-            subprocess.Popen(cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            return f"🎵 Đã mở ngẫu nhiên: **{m_title}** trên Google Chrome (Cổng AI CDP: 9222)!\n🔗 `{m_url}`\n\n*(AI đã sẵn sàng kết nối cổng 9222 để điều khiển dừng/phát hoặc đổi bài theo yêu cầu)*"
-        except Exception as e:
-            return f"Lỗi khi mở Chrome phát nhạc: {str(e)}"
+        ok, res = launch_chrome_cdp(m_url)
+        if ok:
+            return f"🎵 Đã mở ngẫu nhiên: **{m_title}** trên Google Chrome (Cổng AI CDP: 9222, Profile: `C:\\chrome-debug-profile`)!\n🔗 `{m_url}`\n\n*(AI đã sẵn sàng kết nối cổng 9222 để điều khiển dừng/phát hoặc đổi bài theo yêu cầu)*"
+        else:
+            return f"Lỗi khi mở Chrome phát nhạc: {res}"
 
     elif action in ("clean_temp", "clean_disk"):
         temp_dir = Path(tempfile.gettempdir())
