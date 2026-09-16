@@ -817,6 +817,19 @@ POPULAR_MUSIC_SEARCH_QUERIES = [
     "nhạc chill buồn tâm trạng v-pop",
 ]
 
+BACKUP_YOUTH_MUSIC_VIDEOS = [
+    {"id": "oxMdIHHncA8", "title": "NHẠC REMIX TIKTOK TRIỆU VIEW - BXH Nhạc Trẻ Remix Hay Nhất Hiện Nay", "channel": "Orinn Mix"},
+    {"id": "lsuCFTQcL80", "title": "NHẠC REMIX TIKTOK TRIỆU VIEW - Top 20 Nhạc TikTok Hay 2026", "channel": "H2O Remix"},
+    {"id": "omWKT4As8W0", "title": "Nhạc Trẻ Ballad Việt Hay Nhất 2026 - Lk Nhạc Trẻ Mới Gây Nghiện", "channel": "Miu Music"},
+    {"id": "pAIrGkYFjJU", "title": "Top Nhạc Trẻ Remix Hot TikTok 2026", "channel": "Ness Remix"},
+    {"id": "lSWui2tAn98", "title": "BXH Nhạc Trẻ Remix Hay Nhất Hiện Nay", "channel": "Orinn Mix"},
+    {"id": "q1qnFca4vE4", "title": "Tổng Hợp Những Bản Ballad Nhẹ Nhàng Thư Giãn", "channel": "H2O Studio"},
+    {"id": "pDU47uuXEVk", "title": "Top Ca Khúc Nhạc Trẻ Ballad Tâm Trạng", "channel": "Phố Nhạc Chill"},
+    {"id": "1F3y6rUqFvY", "title": "Top Nhạc Trẻ Gây Nghiện Mới Nhất", "channel": "V-Pop Hits"},
+    {"id": "kXYiU_JCYtU", "title": "V-Pop Acoustic Chill Buổi Tối", "channel": "Acoustic V-Pop"},
+    {"id": "0k7b3jYl1b4", "title": "Chill Hits Lofi Nhạc Trẻ Thư Giãn", "channel": "Lofi Chill"},
+]
+
 def search_youtube_videos(query: str, limit: int = 15) -> list[dict]:
     """Tìm kiếm video trực tiếp trên YouTube và trích xuất danh sách video (id, title, channel, url)."""
     import urllib.request
@@ -882,7 +895,8 @@ def search_youtube_videos(query: str, limit: int = 15) -> list[dict]:
     return results
 
 def launch_chrome_cdp(target_url: Optional[str] = None) -> tuple[bool, str]:
-    """Khởi động Google Chrome thông qua file script start_chrome.bat và thực hiện kết nối điều khiển CDP Port 9222."""
+    """Khởi động Google Chrome hoặc điều khiển qua CDP Port 9222.
+    Đảm bảo luôn mở DUY NHẤT 1 CỬA SỔ và phát thẳng video chỉ định."""
     import os
     import time
     import urllib.request
@@ -893,12 +907,36 @@ def launch_chrome_cdp(target_url: Optional[str] = None) -> tuple[bool, str]:
     if not os.path.exists(bat_path):
         return False, f"Không tìm thấy file batch: {bat_path}"
 
+    url_to_open = target_url or "https://www.youtube.com"
+
+    # Kiểm tra xem Chrome và cổng 9222 đã hoạt động hay chưa
+    already_running = False
     try:
-        subprocess.Popen([bat_path], shell=True)
+        with urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=1) as resp:
+            if resp.status == 200:
+                already_running = True
+    except Exception:
+        already_running = False
+
+    if already_running and target_url:
+        # Chrome đã bật: mở tab trong cửa sổ hiện tại
+        try:
+            req_url = f"http://127.0.0.1:9222/json/new?{urllib.parse.quote(target_url, safe=':/?&=%')}"
+            req = urllib.request.Request(req_url, method="PUT")
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                data = json.loads(resp.read().decode())
+                logger.info(f"Đã mở tab video qua CDP: {data.get('url')}")
+            return True, "CDP_NAVIGATED"
+        except Exception as e:
+            logger.warning(f"Lỗi navigate tab qua CDP: {e}")
+
+    # Nếu chưa chạy: chạy file start_chrome.bat và truyền thẳng URL vào để chỉ mở DUY NHẤT 1 CỬA SỔ
+    try:
+        subprocess.Popen([bat_path, url_to_open], shell=True)
     except Exception as e:
         return False, f"Lỗi khi khởi chạy file start_chrome.bat: {str(e)}"
 
-    # Chờ Chrome và CDP port 9222 sẵn sàng
+    # Chờ Chrome sẵn sàng
     time.sleep(3.0)
 
     cdp_connected = False
@@ -913,17 +951,6 @@ def launch_chrome_cdp(target_url: Optional[str] = None) -> tuple[bool, str]:
 
     if not cdp_connected:
         return False, "Đã chạy start_chrome.bat nhưng không thể kết nối tới CDP Port 9222 sau 8 giây."
-
-    # Nếu có target_url (ví dụ link YouTube), mở tab mới qua CDP API
-    if target_url:
-        try:
-            req_url = f"http://127.0.0.1:9222/json/new?{urllib.parse.quote(target_url, safe=':/?&=%')}"
-            req = urllib.request.Request(req_url, method="PUT")
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                data = json.loads(resp.read().decode())
-                logger.info(f"CDP mở tab thành công: {data.get('url')}")
-        except Exception as e:
-            logger.warning(f"Lỗi khi mở URL qua CDP: {e}")
 
     return True, "CDP_9222_CONNECTED"
 
@@ -971,6 +998,9 @@ def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
     elif action in ("open_url", "web_search"):
         if not target:
             return "Error: Vui lòng cung cấp URL hoặc từ khóa tìm kiếm (target)."
+        tgt_low = target.lower().strip()
+        if any(w in tgt_low for w in ("nhạc", "nhac", "bài hát", "bai hat", "youtube", "ca khúc", "bài ca")):
+            return perform_smart_pc_control("open_music", target)
         import webbrowser
         url = target if target.startswith(("http://", "https://")) else f"https://www.google.com/search?q={urllib.parse.quote(target)}"
         try:
@@ -987,12 +1017,15 @@ def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
             search_query = random.choice(POPULAR_MUSIC_SEARCH_QUERIES)
 
         videos = search_youtube_videos(search_query, limit=15)
-        if not videos:
-            chosen_title = "Nhạc Trẻ Mới Nhất Thịnh Hành"
-            chosen_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(search_query)}"
-            chosen_channel = "YouTube Search"
+        valid_videos = [v for v in videos if "watch?v=" in v.get("url", "")]
+
+        if not valid_videos:
+            chosen = random.choice(BACKUP_YOUTH_MUSIC_VIDEOS)
+            chosen_title = chosen["title"]
+            chosen_url = f"https://www.youtube.com/watch?v={chosen['id']}"
+            chosen_channel = chosen.get("channel", "YouTube")
         else:
-            chosen = random.choice(videos)
+            chosen = random.choice(valid_videos)
             chosen_title = chosen["title"]
             chosen_url = chosen["url"]
             chosen_channel = chosen.get("channel", "YouTube")
@@ -1001,8 +1034,8 @@ def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
         if ok:
             return (
                 f"🎵 Đã tìm kiếm: *\"{search_query}\"*\n"
-                f"🎲 Đã chọn ngẫu nhiên: **{chosen_title}** ({chosen_channel})\n"
-                f"🌐 Phát trên Google Chrome (CDP: 9222)\n"
+                f"▶️ Đang phát: **{chosen_title}** ({chosen_channel})\n"
+                f"🌐 Cửa sổ duy nhất trên Google Chrome (CDP: 9222)\n"
                 f"🔗 `{chosen_url}`\n\n"
                 f"*(AI đã sẵn sàng kết nối cổng 9222 để điều khiển dừng/phát hoặc đổi bài theo yêu cầu)*"
             )
