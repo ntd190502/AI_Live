@@ -457,11 +457,11 @@ AGENT_TOOLS = [
                     "properties": {
                         "action": {
                             "type": "STRING",
-                            "description": "Hành động: 'lock' (khóa màn hình), 'open_app' (mở ứng dụng/game), 'open_url' (mở link web/YouTube), 'open_music' (mở ngẫu nhiên list nhạc trẻ trên Chrome kèm cổng AI CDP 9222), 'clean_temp' (dọn file rác tạm thời)."
+                            "description": "Hành động: 'lock' (khóa màn hình), 'open_app' (mở ứng dụng/game), 'open_url' (mở link web), 'open_music' (mở nhạc/bài hát trên YouTube qua Chrome CDP), 'clean_temp' (dọn file rác tạm thời)."
                         },
                         "target": {
                             "type": "STRING",
-                            "description": "Mục tiêu (ví dụ tên app: 'steam', 'spotify', 'code', 'chrome', hoặc link URL cần mở)."
+                            "description": "Mục tiêu: Khi open_app là tên app ('chrome', 'steam'...). Khi open_music BẮT BUỘC trích xuất tên bài hát, ca sĩ, thể loại người dùng nhắc tới (ví dụ: 'sơn tùng mtp', 'nơi này có anh', 'nhạc trẻ remix'). Nếu người dùng chỉ nói nghe nhạc chung chung thì để là 'nhạc trẻ hot tiktok'."
                         }
                     },
                     "required": ["action"]
@@ -923,16 +923,25 @@ def launch_chrome_cdp(target_url: Optional[str] = None) -> tuple[bool, str]:
     if already_running:
         if not target_url:
             return True, "CHROME_ALREADY_RUNNING"
-        # Chrome đã bật: mở tab trong cửa sổ hiện tại
+        # Đóng sạch toàn bộ các tab page cũ để không bị tab kèm tab
         try:
+            with urllib.request.urlopen("http://127.0.0.1:9222/json/list", timeout=2) as resp:
+                tabs = json.loads(resp.read().decode())
+                for t in tabs:
+                    if t.get("type") == "page":
+                        try:
+                            urllib.request.urlopen(f"http://127.0.0.1:9222/json/close/{t['id']}", timeout=1)
+                        except Exception:
+                            pass
+            # Mở duy nhất 1 tab mới với URL
             req_url = f"http://127.0.0.1:9222/json/new?{urllib.parse.quote(target_url, safe=':/?&=%')}"
             req = urllib.request.Request(req_url, method="PUT")
             with urllib.request.urlopen(req, timeout=2) as resp:
                 data = json.loads(resp.read().decode())
-                _log.info(f"Đã mở tab video qua CDP: {data.get('url')}")
+                _log.info(f"Đã mở tab video duy nhất qua CDP: {data.get('url')}")
             return True, "CDP_NAVIGATED"
         except Exception as e:
-            _log.warning(f"Lỗi navigate tab qua CDP: {e}")
+            _log.warning(f"Lỗi dọn tab và mở URL mới qua CDP: {e}")
 
     # Nếu chưa chạy: chạy file start_chrome.bat và truyền thẳng URL vào để chỉ mở DUY NHẤT 1 CỬA SỔ
     try:
@@ -969,7 +978,12 @@ def play_random_youtube_video_via_cdp(search_query: str) -> dict:
     import asyncio
     import concurrent.futures
 
-    encoded_query = urllib.parse.quote(search_query)
+    # Đảm bảo search_query luôn có nội dung hợp lệ
+    query_str = (search_query or "").strip()
+    if not query_str:
+        query_str = random.choice(POPULAR_MUSIC_SEARCH_QUERIES)
+
+    encoded_query = urllib.parse.quote(query_str)
     search_url = f"https://www.youtube.com/results?search_query={encoded_query}"
 
     # 1. Mở trang tìm kiếm trên Chrome qua start_chrome.bat
@@ -1122,10 +1136,16 @@ def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
 
     elif action in ("open_music", "play_music", "music"):
         import random
-        if target and target.strip().lower() not in ("music", "nhạc", "nhac", "bai hat", "bài hát"):
-            search_query = target.strip()
-        else:
+        raw_target = (target or "").strip()
+        for prefix in ("mở bài hát", "bật bài hát", "phát bài hát", "mở bài", "bật bài", "phát bài", "nghe bài", "mở nhạc", "bật nhạc", "phát nhạc", "nghe nhạc", "mở", "bật", "phát", "nghe"):
+            if raw_target.lower().startswith(prefix):
+                raw_target = raw_target[len(prefix):].strip()
+                break
+
+        if not raw_target or raw_target.lower() in ("music", "nhạc", "nhac", "bài hát", "bai hat", "bài ca"):
             search_query = random.choice(POPULAR_MUSIC_SEARCH_QUERIES)
+        else:
+            search_query = raw_target
 
         cdp_res = play_random_youtube_video_via_cdp(search_query)
         if cdp_res and cdp_res.get("success"):
