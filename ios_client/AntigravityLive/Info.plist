@@ -22,6 +22,8 @@
 	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>MinimumOSVersion</key>
+	<string>14.0</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Ứng dụng cần quyền Micro để bạn có thể Live đối thoại giọng nói với Antigravity.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

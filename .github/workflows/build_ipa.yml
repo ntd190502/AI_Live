@@ -36,6 +36,8 @@ jobs:
         run: |
           mkdir -p build/ipa/Payload
           cp -r build/archive/AntigravityLive.xcarchive/Products/Applications/AntigravityLive.app build/ipa/Payload/
+          # Sign with ad-hoc signature for iOS 14.x AMFI compatibility
+          codesign --force --deep --sign - build/ipa/Payload/AntigravityLive.app || true
           cd build/ipa
           zip -r ../../AntigravityLive.ipa Payload
           cd ../..
