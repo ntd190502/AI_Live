@@ -154,6 +154,14 @@ class WebSocketService: NSObject, URLSessionWebSocketDelegate {
         sendJSON(payload)
     }
     
+    func requestSync(sessionId: String = AppConfig.sessionId) {
+        let payload: [String: Any] = [
+            "type": "sync",
+            "session_id": sessionId
+        ]
+        sendJSON(payload)
+    }
+    
     private func sendJSON(_ dict: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: dict),
               let jsonString = String(data: data, encoding: .utf8) else { return }
@@ -280,6 +288,7 @@ class WebSocketService: NSObject, URLSessionWebSocketDelegate {
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         DispatchQueue.main.async {
             self.isConnected = true
+            self.requestSync()
             self.notifyListeners { $0.webSocketDidConnect() }
         }
     }

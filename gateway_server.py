@@ -177,6 +177,27 @@ async def chat_api(req: ChatRequest):
         "status_updates": status_updates
     }
 
+# Session State Registry for background execution & auto-sync across reconnects
+class SessionTurnState:
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.active_websocket: Optional[WebSocket] = None
+        self.current_turn_task: Optional[asyncio.Task] = None
+        self.is_thinking: bool = False
+        self.current_status: str = "Sẵn sàng"
+        self.accumulated_text: List[str] = []
+        self.last_full_text: str = ""
+        self.last_voice_b64: Optional[str] = None
+        self.delivered: bool = True
+        self.turn_id: int = 0
+
+session_states: Dict[str, SessionTurnState] = {}
+
+def get_session_state(session_id: str) -> SessionTurnState:
+    if session_id not in session_states:
+        session_states[session_id] = SessionTurnState(session_id)
+    return session_states[session_id]
+
 async def safe_send_json(ws: WebSocket, payload: dict) -> bool:
     try:
         await ws.send_json(payload)
@@ -185,39 +206,82 @@ async def safe_send_json(ws: WebSocket, payload: dict) -> bool:
         logger.warning(f"safe_send_json error ({type(ex).__name__}): {ex}")
         return False
 
+async def send_session_event(session_id: str, payload: dict) -> bool:
+    state = get_session_state(session_id)
+    ws = state.active_websocket
+    if ws is not None:
+        success = await safe_send_json(ws, payload)
+        if not success:
+            state.active_websocket = None
+        return success
+    return False
+
+async def replay_session_state_to_ws(websocket: WebSocket, session_id: str):
+    """
+    Called when a WebSocket connects or requests sync.
+    If the session has an active background turn or an undelivered completed turn,
+    replay it to the newly connected websocket.
+    """
+    state = get_session_state(session_id)
+    state.active_websocket = websocket
+
+    if state.is_thinking:
+        logger.info(f"Session '{session_id}': AI đang suy luận ngầm -> Cập nhật trạng thái cho WebSocket mới.")
+        await safe_send_json(websocket, {
+            "type": "status",
+            "text": state.current_status or "Antigravity đang tiếp tục suy nghĩ..."
+        })
+        if state.accumulated_text:
+            await safe_send_json(websocket, {
+                "type": "text_delta",
+                "delta": "".join(state.accumulated_text)
+            })
+    elif not state.delivered and state.last_full_text:
+        logger.info(f"Session '{session_id}': AI đã hoàn thành lượt chạy ngầm -> Đồng bộ thoại & audio về cho iPhone.")
+        await safe_send_json(websocket, {
+            "type": "status",
+            "text": "Đã cập nhật phản hồi mới nhất từ PC."
+        })
+        await safe_send_json(websocket, {
+            "type": "text_delta",
+            "delta": state.last_full_text
+        })
+        if state.last_voice_b64:
+            await safe_send_json(websocket, {
+                "type": "voice_chunk",
+                "audio_b64": state.last_voice_b64,
+                "mime": "audio/mp3",
+                "full_text": state.last_full_text
+            })
+        await safe_send_json(websocket, {
+            "type": "turn_complete",
+            "full_text": state.last_full_text
+        })
+        state.delivered = True
+
 @app.websocket("/ws/live")
 async def websocket_live_endpoint(websocket: WebSocket):
     """
     Real-time Duplex Live Voice & Chat WebSocket Endpoint.
-    
-    Incoming Messages (JSON):
-      - {"type": "chat_text", "session_id": "...", "text": "..."}
-      - {"type": "voice_audio", "session_id": "...", "audio_b64": "...", "mime": "audio/wav", "live_call": true}
-      - {"type": "cancel"} / {"type": "interrupt"}
-      - {"type": "ping"}
-      - {"type": "reset", "session_id": "..."}
-      
-    Outgoing Messages (JSON):
-      - {"type": "status", "text": "..."}
-      - {"type": "text_delta", "delta": "..."}
-      - {"type": "tool_executed", "tool": "...", "output": "..."}
-      - {"type": "voice_chunk", "audio_b64": "...", "full_text": "..."}
-      - {"type": "screenshot", "image_b64": "...", "caption": "..."}
-      - {"type": "turn_complete", "full_text": "..."}
-      - {"type": "error", "message": "..."}
-      - {"type": "pong", "time": ...}
+    Supports auto-reconnection and persistent background AI reasoning.
     """
     await websocket.accept()
-    logger.info("iOS Client đã kết nối vào WebSocket /ws/live!")
+    client_session_id = websocket.query_params.get("session_id", "default_ios")
+    logger.info(f"iOS Client đã kết nối vào WebSocket /ws/live (session_id={client_session_id})!")
 
-    current_turn_task: Optional[asyncio.Task] = None
+    state = get_session_state(client_session_id)
+    state.active_websocket = websocket
+
+    # Immediately replay pending response or live thinking status to newly connected client
+    await replay_session_state_to_ws(websocket, client_session_id)
+
     keepalive_active = True
 
     async def heartbeat_worker():
         while keepalive_active:
             try:
                 await asyncio.sleep(3.0)
-                if keepalive_active:
+                if keepalive_active and state.active_websocket == websocket:
                     await safe_send_json(websocket, {"type": "ping"})
             except asyncio.CancelledError:
                 break
@@ -226,9 +290,15 @@ async def websocket_live_endpoint(websocket: WebSocket):
 
     heartbeat_task = asyncio.create_task(heartbeat_worker())
 
-    async def process_user_turn(session: AntigravitySession, is_live_call: bool):
-        accumulated_text = []
+    async def process_user_turn(session_id: str, is_live_call: bool):
+        turn_state = get_session_state(session_id)
+        session = get_or_create_session(session_id)
+        turn_state.is_thinking = True
+        turn_state.delivered = False
+        turn_state.accumulated_text = []
+        turn_state.turn_id += 1
         turn_start = time.time()
+
         try:
             async for event_type, data in run_agent_turn(
                 session=session,
@@ -237,13 +307,14 @@ async def websocket_live_endpoint(websocket: WebSocket):
                 is_live_call=is_live_call
             ):
                 if event_type == "status":
-                    await safe_send_json(websocket, {"type": "status", "text": str(data)})
+                    turn_state.current_status = str(data)
+                    await send_session_event(session_id, {"type": "status", "text": str(data)})
                 elif event_type == "text":
-                    accumulated_text.append(data)
-                    await safe_send_json(websocket, {"type": "text_delta", "delta": data})
+                    turn_state.accumulated_text.append(data)
+                    await send_session_event(session_id, {"type": "text_delta", "delta": data})
                 elif event_type == "tool_output":
                     logger.info(f"Tool executed: {data.get('tool')}")
-                    await safe_send_json(websocket, {
+                    await send_session_event(session_id, {
                         "type": "tool_executed",
                         "tool": data.get("tool"),
                         "output": str(data.get("output"))[:1000]
@@ -255,7 +326,7 @@ async def websocket_live_endpoint(websocket: WebSocket):
                         try:
                             with open(f_path, "rb") as f:
                                 img_b64 = base64.b64encode(f.read()).decode("utf-8")
-                            await safe_send_json(websocket, {
+                            await send_session_event(session_id, {
                                 "type": "screenshot",
                                 "image_b64": img_b64,
                                 "caption": caption
@@ -264,16 +335,20 @@ async def websocket_live_endpoint(websocket: WebSocket):
                             logger.warning(f"Lỗi đọc file gửi: {fe}")
                 elif event_type == "error":
                     logger.error(f"Agent error event: {data}")
-                    await safe_send_json(websocket, {"type": "error", "message": str(data)})
+                    turn_state.is_thinking = False
+                    await send_session_event(session_id, {"type": "error", "message": str(data)})
                     return
 
-            final_full_text = "".join(accumulated_text).strip()
+            final_full_text = "".join(turn_state.accumulated_text).strip()
+            turn_state.last_full_text = final_full_text
             turn_elapsed = time.time() - turn_start
             logger.info(f"AI hoàn thành câu trả lời ({len(final_full_text)} ký tự, {turn_elapsed:.2f}s): '{final_full_text[:60]}...'")
 
             # Synthesize Hoài My voice for Live Calls
+            v_b64 = None
             if is_live_call and final_full_text:
-                await safe_send_json(websocket, {"type": "status", "text": "Đang phát giọng nói Hoài My..."})
+                turn_state.current_status = "Đang phát giọng nói Hoài My..."
+                await send_session_event(session_id, {"type": "status", "text": "Đang phát giọng nói Hoài My..."})
                 try:
                     tts_start = time.time()
                     voice_path = await generate_vietnamese_voice(final_full_text)
@@ -282,25 +357,32 @@ async def websocket_live_endpoint(websocket: WebSocket):
                             v_b64 = base64.b64encode(vf.read()).decode("utf-8")
                         tts_elapsed = time.time() - tts_start
                         logger.info(f"Sinh voice TTS xong trong {tts_elapsed:.2f}s. Đang đẩy về iPhone...")
-                        await safe_send_json(websocket, {
+                        turn_state.last_voice_b64 = v_b64
+                        sent_voice = await send_session_event(session_id, {
                             "type": "voice_chunk",
                             "audio_b64": v_b64,
                             "mime": "audio/mp3",
                             "full_text": final_full_text
                         })
+                        if sent_voice:
+                            turn_state.delivered = True
                 except Exception as ve:
                     logger.error(f"Lỗi tạo voice TTS: {ve}")
 
-            await safe_send_json(websocket, {
+            sent_complete = await send_session_event(session_id, {
                 "type": "turn_complete",
                 "full_text": final_full_text
             })
+            if sent_complete:
+                turn_state.delivered = True
 
         except asyncio.CancelledError:
-            logger.info("Lượt xử lý AI bị ngắt bởi người dùng (Barge-in / Cancel).")
+            logger.info(f"Lượt xử lý AI session {session_id} bị ngắt bởi người dùng (Barge-in / Cancel).")
         except Exception as ex:
             logger.error(f"Lỗi trong quá trình xử lý agent turn: {ex}", exc_info=True)
-            await safe_send_json(websocket, {"type": "error", "message": f"Lỗi Agent: {str(ex)}"})
+            await send_session_event(session_id, {"type": "error", "message": f"Lỗi Agent: {str(ex)}"})
+        finally:
+            turn_state.is_thinking = False
 
     try:
         while True:
@@ -312,36 +394,45 @@ async def websocket_live_endpoint(websocket: WebSocket):
                 continue
 
             msg_type = msg.get("type", "")
-            session_id = msg.get("session_id", "default_ios")
+            session_id = msg.get("session_id", client_session_id)
             session = get_or_create_session(session_id)
+            sess_state = get_session_state(session_id)
+            sess_state.active_websocket = websocket
 
             if msg_type == "ping":
                 await websocket.send_json({"type": "pong", "time": time.time()})
                 continue
 
+            elif msg_type == "sync":
+                await replay_session_state_to_ws(websocket, session_id)
+                continue
+
             elif msg_type in ("cancel", "interrupt"):
-                if current_turn_task and not current_turn_task.done():
-                    current_turn_task.cancel()
-                    current_turn_task = None
+                if sess_state.current_turn_task and not sess_state.current_turn_task.done():
+                    sess_state.current_turn_task.cancel()
+                    sess_state.current_turn_task = None
                 await safe_send_json(websocket, {"type": "status", "text": "Đã ngắt lời Antigravity."})
                 await safe_send_json(websocket, {"type": "turn_complete", "full_text": ""})
                 continue
 
             elif msg_type == "reset":
-                if current_turn_task and not current_turn_task.done():
-                    current_turn_task.cancel()
-                    current_turn_task = None
+                if sess_state.current_turn_task and not sess_state.current_turn_task.done():
+                    sess_state.current_turn_task.cancel()
+                    sess_state.current_turn_task = None
                 session.history.clear()
                 session.title = "Phiên mới"
+                sess_state.accumulated_text.clear()
+                sess_state.last_full_text = ""
+                sess_state.last_voice_b64 = None
+                sess_state.delivered = True
                 await websocket.send_json({"type": "status", "text": "Đã làm mới phiên trò chuyện."})
                 continue
 
             elif msg_type in ("chat_text", "voice_audio"):
-                # If a previous turn is still computing, cancel it to support immediate barge-in / interruption
-                if current_turn_task and not current_turn_task.done():
-                    logger.info("Người dùng nói câu mới khi AI đang bận -> Hủy lượt cũ ngay lập tức (Barge-in).")
-                    current_turn_task.cancel()
-                    current_turn_task = None
+                if sess_state.current_turn_task and not sess_state.current_turn_task.done():
+                    logger.info(f"Người dùng nói câu mới khi AI đang bận -> Hủy lượt cũ (Barge-in) session {session_id}.")
+                    sess_state.current_turn_task.cancel()
+                    sess_state.current_turn_task = None
 
                 user_text = msg.get("text", "")
                 audio_b64 = msg.get("audio_b64")
@@ -350,7 +441,7 @@ async def websocket_live_endpoint(websocket: WebSocket):
                 mime_type = msg.get("image_mime", "image/jpeg")
                 is_live_call = (msg_type == "voice_audio") or msg.get("live_call", True)
 
-                logger.info(f"Nhận yêu cầu: type={msg_type}, text='{user_text[:50]}', audio={bool(audio_b64)}, live_call={is_live_call}")
+                logger.info(f"Nhận yêu cầu: type={msg_type}, session={session_id}, text='{user_text[:50]}', audio={bool(audio_b64)}, live_call={is_live_call}")
 
                 session.add_user_message(
                     text=user_text,
@@ -361,18 +452,20 @@ async def websocket_live_endpoint(websocket: WebSocket):
                 )
                 await safe_send_json(websocket, {"type": "status", "text": "Antigravity đang lắng nghe và suy nghĩ..."})
 
-                # Spawn agent turn as independent asyncio Task to keep receive_text loop active
-                current_turn_task = asyncio.create_task(process_user_turn(session, is_live_call))
+                # Spawn agent turn as independent asyncio Task tied to session_id
+                sess_state.current_turn_task = asyncio.create_task(process_user_turn(session_id, is_live_call))
 
     except WebSocketDisconnect:
-        logger.info("iOS Client đã ngắt kết nối WebSocket (hoặc ẩn app).")
+        logger.info(f"iOS Client đã ngắt kết nối WebSocket (session_id={client_session_id}).")
     except Exception as e:
         logger.error(f"WebSocket Exception: {e}", exc_info=True)
     finally:
         keepalive_active = False
         heartbeat_task.cancel()
-        if current_turn_task and not current_turn_task.done():
-            logger.info("Client tạm ngắt socket, AI trên PC vẫn tiếp tục chạy độc lập trong nền cho xong nhiệm vụ.")
+        if state.active_websocket == websocket:
+            state.active_websocket = None
+        if state.current_turn_task and not state.current_turn_task.done():
+            logger.info(f"Session {client_session_id}: Client tạm ngắt socket, AI trên PC vẫn tiếp tục chạy độc lập trong nền.")
 
 if __name__ == "__main__":
     import argparse

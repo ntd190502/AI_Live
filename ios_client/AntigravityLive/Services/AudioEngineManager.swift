@@ -10,6 +10,7 @@ class AudioEngineManager: NSObject, ObservableObject, AVAudioPlayerDelegate, AVA
     private var audioPlayer: AVAudioPlayer?
     private var levelTimer: Timer?
     private var recordingURL: URL?
+    private var playCompletion: (() -> Void)?
     
     override init() {
         super.init()
@@ -91,6 +92,7 @@ class AudioEngineManager: NSObject, ObservableObject, AVAudioPlayerDelegate, AVA
     func playVoiceData(_ data: Data, completion: (() -> Void)? = nil) {
         do {
             stopPlayback()
+            self.playCompletion = completion
             audioPlayer = try AVAudioPlayer(data: data)
             audioPlayer?.delegate = self
             audioPlayer?.isMeteringEnabled = true
@@ -101,6 +103,7 @@ class AudioEngineManager: NSObject, ObservableObject, AVAudioPlayerDelegate, AVA
             startPlaybackMetering()
         } catch {
             print("[AudioEngine] Playback error: \(error)")
+            completion?()
         }
     }
     
@@ -111,6 +114,9 @@ class AudioEngineManager: NSObject, ObservableObject, AVAudioPlayerDelegate, AVA
             isPlaying = false
             stopMetering()
             audioLevel = 0.0
+            let comp = playCompletion
+            playCompletion = nil
+            comp?()
         }
     }
     
@@ -154,6 +160,9 @@ class AudioEngineManager: NSObject, ObservableObject, AVAudioPlayerDelegate, AVA
         DispatchQueue.main.async {
             self.isPlaying = false
             self.stopMetering()
+            let comp = self.playCompletion
+            self.playCompletion = nil
+            comp?()
         }
     }
 }

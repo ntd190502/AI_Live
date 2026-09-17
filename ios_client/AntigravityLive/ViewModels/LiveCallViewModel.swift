@@ -43,6 +43,8 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
                 if !self.wsService.isConnected {
                     self.statusSubtitle = "Đang kết nối lại PC..."
                     self.wsService.reconnectIfDisconnected()
+                } else {
+                    self.wsService.requestSync()
                 }
             }
             .store(in: &cancellables)
@@ -55,6 +57,7 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
                 callState = .idle
                 statusSubtitle = "Sẵn sàng. Giữ nút để nói."
             }
+            wsService.requestSync()
         } else {
             connect()
         }
@@ -87,6 +90,7 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
             wsService.cancelCurrentTurn()
         }
         
+        lastTranscript = ""
         audioEngine.startRecording()
         callState = .listening
         statusSubtitle = "Hãy nói gì đó với Antigravity..."
@@ -125,8 +129,10 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
     
     // MARK: - WebSocketServiceDelegate
     func webSocketDidConnect() {
-        callState = .idle
-        statusSubtitle = "Đã kết nối! Bấm giữ nút để nói chuyện."
+        if callState != .speaking && callState != .thinking {
+            callState = .idle
+            statusSubtitle = "Đã kết nối! Bấm giữ nút để nói chuyện."
+        }
     }
     
     func webSocketDidDisconnect(error: Error?) {
@@ -164,6 +170,9 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
     }
     
     func webSocketDidCompleteTurn(fullText: String) {
+        if !fullText.isEmpty {
+            lastTranscript = fullText
+        }
         if !audioEngine.isPlaying {
             callState = .idle
             statusSubtitle = "Sẵn sàng cho câu hỏi tiếp theo."

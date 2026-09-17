@@ -48,6 +48,10 @@ struct AppConfig {
     }
     
     static var wsLiveURL: URL? {
-        return URL(string: "ws://\(serverHost):\(serverPort)/ws/live")
+        var components = URLComponents(string: "ws://\(serverHost):\(serverPort)/ws/live")
+        components?.queryItems = [
+            URLQueryItem(name: "session_id", value: sessionId)
+        ]
+        return components?.url ?? URL(string: "ws://\(serverHost):\(serverPort)/ws/live?session_id=\(sessionId)")
     }
 }

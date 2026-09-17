@@ -84,20 +84,35 @@ class ChatViewModel: ObservableObject, WebSocketServiceDelegate {
     }
     
     func webSocketDidReceiveTextDelta(_ delta: String) {
-        guard let id = currentAgentMessageId,
-              let idx = messages.firstIndex(where: { $0.id == id }) else { return }
-        
-        messages[idx].isThinking = false
-        messages[idx].text += delta
+        if let id = currentAgentMessageId,
+           let idx = messages.firstIndex(where: { $0.id == id }) {
+            messages[idx].isThinking = false
+            messages[idx].text += delta
+        } else if let lastIdx = messages.indices.last, messages[lastIdx].sender == .agent && messages[lastIdx].isThinking {
+            messages[lastIdx].isThinking = false
+            messages[lastIdx].text += delta
+            currentAgentMessageId = messages[lastIdx].id
+        } else {
+            let newMsg = ChatMessage(sender: .agent, text: delta)
+            messages.append(newMsg)
+            currentAgentMessageId = newMsg.id
+        }
     }
     
     func webSocketDidReceiveVoiceChunk(audioData: Data, fullText: String) {
-        guard let id = currentAgentMessageId,
-              let idx = messages.firstIndex(where: { $0.id == id }) else { return }
-        
-        messages[idx].audioData = audioData
-        if messages[idx].text.isEmpty {
-            messages[idx].text = fullText
+        if let id = currentAgentMessageId,
+           let idx = messages.firstIndex(where: { $0.id == id }) {
+            messages[idx].audioData = audioData
+            if messages[idx].text.isEmpty {
+                messages[idx].text = fullText
+            }
+        } else if let lastIdx = messages.indices.last, messages[lastIdx].sender == .agent {
+            messages[lastIdx].audioData = audioData
+            if messages[lastIdx].text.isEmpty {
+                messages[lastIdx].text = fullText
+            }
+        } else {
+            messages.append(ChatMessage(sender: .agent, text: fullText, audioData: audioData))
         }
     }
     
@@ -119,6 +134,11 @@ class ChatViewModel: ObservableObject, WebSocketServiceDelegate {
             messages[idx].isThinking = false
             if messages[idx].text.isEmpty {
                 messages[idx].text = fullText
+            }
+        } else if !fullText.isEmpty {
+            if let lastIdx = messages.indices.last, messages[lastIdx].sender == .agent && messages[lastIdx].isThinking {
+                messages[lastIdx].isThinking = false
+                messages[lastIdx].text = fullText
             }
         }
         currentAgentMessageId = nil
