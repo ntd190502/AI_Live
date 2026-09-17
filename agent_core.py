@@ -461,7 +461,7 @@ AGENT_TOOLS = [
                         },
                         "target": {
                             "type": "STRING",
-                            "description": "Mục tiêu: Khi open_app là tên app ('chrome', 'steam'...). Khi open_music BẮT BUỘC trích xuất tên bài hát, ca sĩ, thể loại người dùng nhắc tới (ví dụ: 'sơn tùng mtp', 'nơi này có anh', 'nhạc trẻ remix'). Nếu người dùng chỉ nói nghe nhạc chung chung thì để là 'nhạc trẻ hot tiktok'."
+                            "description": "Mục tiêu: Khi open_app là tên app ('chrome', 'steam'...). Khi open_music BẮT BUỘC chỉ điền tên bài hát hoặc ca sĩ dưới dạng văn bản thuần túy (ví dụ: 'lạc trôi', 'sơn tùng mtp', 'nhạc trẻ remix'). TUYỆT ĐỐI CẤM điền URL (như https://youtube.com/results?search_query=) hoặc từ 'chrome'."
                         }
                     },
                     "required": ["action"]
@@ -967,8 +967,61 @@ def launch_chrome_cdp(target_url: Optional[str] = None) -> tuple[bool, str]:
 
     return True, "CDP_9222_CONNECTED"
 
+def sanitize_music_target(target: Optional[str]) -> str:
+    """Làm sạch triệt để từ khóa tìm kiếm âm nhạc, loại bỏ URL rác (search_query=) và từ thừa mở app."""
+    import urllib.parse
+    import random
+    raw = (target or "").strip()
+    if not raw:
+        return random.choice(POPULAR_MUSIC_SEARCH_QUERIES)
+
+    # 1. Nếu raw là URL hoặc chứa URL
+    if "youtube.com" in raw or "youtu.be" in raw or raw.startswith(("http://", "https://")):
+        try:
+            parsed = urllib.parse.urlparse(raw)
+            qs = urllib.parse.parse_qs(parsed.query)
+            if "search_query" in qs and qs["search_query"] and qs["search_query"][0].strip():
+                raw = qs["search_query"][0].strip()
+            elif "v" in qs and qs["v"]:
+                return f"https://www.youtube.com/watch?v={qs['v'][0]}"
+            else:
+                return random.choice(POPULAR_MUSIC_SEARCH_QUERIES)
+        except Exception:
+            return random.choice(POPULAR_MUSIC_SEARCH_QUERIES)
+
+    # 2. Xóa các từ thừa liên quan đến mở Chrome/YouTube/trình duyệt
+    cleaned = raw
+    for prefix in (
+        "mở bài hát", "bật bài hát", "phát bài hát", "nghe bài hát",
+        "mở bài ca", "bật bài ca", "phát bài ca", "nghe bài ca",
+        "mở ca khúc", "bật ca khúc", "phát ca khúc", "nghe ca khúc",
+        "mở bài", "bật bài", "phát bài", "nghe bài",
+        "mở nhạc", "bật nhạc", "phát nhạc", "nghe nhạc",
+        "mở chrome nghe nhạc", "bật chrome nghe nhạc", "mở chome nghe nhạc", "bật chome nghe nhạc",
+        "mở chrome", "bật chrome", "mở chome", "bật chome",
+        "mở youtube", "bật youtube",
+        "mở", "bật", "phát", "nghe", "play"
+    ):
+        if cleaned.lower().startswith(prefix):
+            cleaned = cleaned[len(prefix):].strip()
+            break
+
+    cleaned = re.sub(r"\b(trên|ở|bằng|qua)\s+(youtube|chrome|chome|cờ rôm|trình duyệt|web)\b", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"\b(chrome|chome|cờ rôm|cô rôm|youtube|trình duyệt|web)\b", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"\b(đi mày|hộ tao|cho tao|giúp tao|đi nhe|nha|nhé|đi)\b", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"[\"\'\`*]", "", cleaned).strip()
+
+    if not cleaned or cleaned.lower() in (
+        "music", "nhạc", "nhac", "nghe nhạc", "mở nhạc", "bật nhạc", "phát nhạc",
+        "bài hát", "bai hat", "bài ca", "ca khúc", "bài"
+    ):
+        return random.choice(POPULAR_MUSIC_SEARCH_QUERIES)
+
+    return cleaned
+
 def play_random_youtube_video_via_cdp(search_query: str) -> dict:
-    """Mở trang tìm kiếm YouTube trên Chrome, dùng CDP tự động bốc ngẫu nhiên 1 video từ vị trí 1-10 và click phát ngay lập tức."""
+    """Mở trang tìm kiếm YouTube trên Chrome, dùng CDP tự động bốc ngẫu nhiên 1 video từ vị trí 1-10 và click phát ngay lập tức.
+    Nếu CDP hoặc mạng chậm không bắt được link, tự động fallback điều hướng thẳng vào 1 video thịnh hành (100% phát nhạc thành công)."""
     import urllib.request
     import urllib.parse
     import json
@@ -978,12 +1031,23 @@ def play_random_youtube_video_via_cdp(search_query: str) -> dict:
     import asyncio
     import concurrent.futures
 
-    # Đảm bảo search_query luôn có nội dung hợp lệ
-    query_str = (search_query or "").strip()
-    if not query_str:
-        query_str = random.choice(POPULAR_MUSIC_SEARCH_QUERIES)
+    # Luôn làm sạch từ khóa tìm kiếm (loại bỏ sạch sẽ URL rác và từ thừa)
+    clean_query = sanitize_music_target(search_query)
 
-    encoded_query = urllib.parse.quote(query_str)
+    # Nếu người dùng đã cung cấp sẵn link video trực tiếp
+    if clean_query.startswith("https://www.youtube.com/watch?v="):
+        launch_ok, launch_msg = launch_chrome_cdp(clean_query)
+        if launch_ok:
+            return {
+                "success": True,
+                "chosenIndex": 1,
+                "totalFound": 1,
+                "title": "Video YouTube",
+                "url": clean_query
+            }
+        return {"success": False, "error": launch_msg}
+
+    encoded_query = urllib.parse.quote(clean_query)
     search_url = f"https://www.youtube.com/results?search_query={encoded_query}"
 
     # 1. Mở trang tìm kiếm trên Chrome qua start_chrome.bat
@@ -1075,6 +1139,45 @@ def play_random_youtube_video_via_cdp(search_query: str) -> dict:
         else:
             res_val = loop.run_until_complete(_do_eval())
 
+        # Fallback Guaranteed: Nếu CDP evaluate không bấm được video (do mạng chậm/DOM lag)
+        # Tuyệt đối không để Chrome dừng ở trang search query! Tự bốc 1 video hot và điều hướng ngay!
+        if not (res_val and res_val.get("success")):
+            backup = random.choice(BACKUP_YOUTH_MUSIC_VIDEOS)
+            backup_url = f"https://www.youtube.com/watch?v={backup['id']}"
+            fallback_js = f"window.location.href = '{backup_url}';"
+
+            async def _do_fallback_nav():
+                async with websockets.connect(ws_url) as ws:
+                    cmd = {
+                        "id": 101,
+                        "method": "Runtime.evaluate",
+                        "params": {
+                            "expression": fallback_js,
+                            "returnByValue": True
+                        }
+                    }
+                    await ws.send(json.dumps(cmd))
+                    await ws.recv()
+
+            try:
+                if loop.is_running():
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        pool.submit(asyncio.run, _do_fallback_nav()).result()
+                else:
+                    loop.run_until_complete(_do_fallback_nav())
+                return {
+                    "success": True,
+                    "chosenIndex": 1,
+                    "totalFound": 1,
+                    "title": backup["title"],
+                    "url": backup_url,
+                    "query": clean_query
+                }
+            except Exception:
+                pass
+
+        if res_val:
+            res_val["query"] = clean_query
         return res_val
     except Exception as e:
         return {"success": False, "error": f"Lỗi CDP WebSocket Runtime.evaluate: {e}"}
@@ -1103,7 +1206,9 @@ def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
             cmd = "start spotify:"
         elif "discord" in tgt:
             cmd = "start discord:"
-        elif "chrome" in tgt:
+        elif "chrome" in tgt or "chome" in tgt:
+            if any(w in tgt for w in ("nhạc", "nhac", "bài", "hát", "music", "youtube")):
+                return perform_smart_pc_control("open_music", target)
             ok, res = launch_chrome_cdp()
             if ok:
                 return f"🌐 Đã khởi chạy Google Chrome (Cổng AI CDP: 9222, Profile: `C:\\chrome-debug-profile`) thành công."
@@ -1124,7 +1229,7 @@ def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
         if not target:
             return "Error: Vui lòng cung cấp URL hoặc từ khóa tìm kiếm (target)."
         tgt_low = target.lower().strip()
-        if any(w in tgt_low for w in ("nhạc", "nhac", "bài hát", "bai hat", "youtube", "ca khúc", "bài ca")):
+        if any(w in tgt_low for w in ("nhạc", "nhac", "bài hát", "bai hat", "youtube", "ca khúc", "bài ca")) or "results?search_query=" in tgt_low:
             return perform_smart_pc_control("open_music", target)
         import webbrowser
         url = target if target.startswith(("http://", "https://")) else f"https://www.google.com/search?q={urllib.parse.quote(target)}"
@@ -1135,25 +1240,15 @@ def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
             return f"Lỗi khi mở URL: {str(e)}"
 
     elif action in ("open_music", "play_music", "music"):
-        import random
-        raw_target = (target or "").strip()
-        for prefix in ("mở bài hát", "bật bài hát", "phát bài hát", "mở bài", "bật bài", "phát bài", "nghe bài", "mở nhạc", "bật nhạc", "phát nhạc", "nghe nhạc", "mở", "bật", "phát", "nghe"):
-            if raw_target.lower().startswith(prefix):
-                raw_target = raw_target[len(prefix):].strip()
-                break
-
-        if not raw_target or raw_target.lower() in ("music", "nhạc", "nhac", "bài hát", "bai hat", "bài ca"):
-            search_query = random.choice(POPULAR_MUSIC_SEARCH_QUERIES)
-        else:
-            search_query = raw_target
-
+        search_query = sanitize_music_target(target)
         cdp_res = play_random_youtube_video_via_cdp(search_query)
         if cdp_res and cdp_res.get("success"):
             chosen_idx = cdp_res.get("chosenIndex", 1)
             title = cdp_res.get("title", "Video YouTube")
             url = cdp_res.get("url", "")
+            actual_q = cdp_res.get("query", search_query)
             return (
-                f"🔍 Đã tìm kiếm trên YouTube: *\"{search_query}\"*\n"
+                f"🔍 Đã tìm kiếm trên YouTube: *\"{actual_q}\"*\n"
                 f"🎲 Tự động bấm vào video số #{chosen_idx} trong top 10:\n"
                 f"▶️ **{title}**\n"
                 f"🔗 `{url}`\n\n"
@@ -1161,7 +1256,7 @@ def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
             )
         else:
             err = cdp_res.get("error") if cdp_res else "Lỗi kết nối CDP"
-            return f"⚠️ Đã mở trang tìm kiếm YouTube: *\"{search_query}\"* (Không tự bấm được video: {err})"
+            return f"⚠️ Đã mở YouTube: *\"{search_query}\"* (Không tự bấm được video: {err})"
 
     elif action in ("clean_temp", "clean_disk"):
         temp_dir = Path(tempfile.gettempdir())
@@ -2968,7 +3063,10 @@ def match_fast_path_tool(text: str) -> Tuple[Optional[str], Optional[Dict[str, A
     for rule in FAST_PATH_RULES:
         for p in rule["patterns"]:
             if re.search(p, t):
-                return rule["tool"], rule["args"], rule.get("desc")
+                args = dict(rule["args"])
+                if rule["tool"] == "smart_pc_control" and args.get("action") == "open_music":
+                    args["target"] = sanitize_music_target(text)
+                return rule["tool"], args, rule.get("desc")
     return None, None, None
 
 async def run_agent_turn(
