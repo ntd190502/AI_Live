@@ -12,9 +12,19 @@ class AudioEngineManager: NSObject, ObservableObject, AVAudioPlayerDelegate, AVA
     private var recordingURL: URL?
     private var playCompletion: (() -> Void)?
     
+    // Voice Activity Detection (VAD) for 1vs1 Hands-Free Mode
+    var isVADEnabled: Bool = false
+    var onVADDetectedEndOfSpeech: (() -> Void)?
+    private var vadSpeechStarted: Bool = false
+    private var vadSilenceStartTime: Date?
+    
     override init() {
         super.init()
         setupAudioSession()
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
     
     private func setupAudioSession() {
@@ -22,9 +32,50 @@ class AudioEngineManager: NSObject, ObservableObject, AVAudioPlayerDelegate, AVA
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
             try session.setActive(true)
+            
+            // Listen for system interruptions (phone calls, Siri, alarms)
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleAudioSessionInterruption),
+                name: AVAudioSession.interruptionNotification,
+                object: nil
+            )
+            
+            // Listen for audio route changes (AirPods connected, headset plugged/unplugged)
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleAudioRouteChange),
+                name: AVAudioSession.routeChangeNotification,
+                object: nil
+            )
         } catch {
             print("[AudioEngine] Error configuring audio session: \(error.localizedDescription)")
         }
+    }
+    
+    @objc private func handleAudioSessionInterruption(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        
+        if type == .began {
+            print("[AudioEngine] Hệ thống tạm ngắt AudioSession (cuộc gọi / Siri / báo thức)...")
+            stopRecording()
+            stopPlayback()
+        } else if type == .ended {
+            if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
+                let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+                if options.contains(.shouldResume) {
+                    print("[AudioEngine] Hết gián đoạn, tự động khôi phục AudioSession...")
+                    try? AVAudioSession.sharedInstance().setActive(true)
+                }
+            }
+        }
+    }
+    
+    @objc private func handleAudioRouteChange(notification: Notification) {
+        print("[AudioEngine] Thay đổi cổng âm thanh (AirPods / tai nghe)...")
+        try? AVAudioSession.sharedInstance().setActive(true)
     }
     
     private var recordingStartTime: Date?
@@ -33,6 +84,8 @@ class AudioEngineManager: NSObject, ObservableObject, AVAudioPlayerDelegate, AVA
         let tempDir = FileManager.default.temporaryDirectory
         recordingURL = tempDir.appendingPathComponent("live_input_\(Date().timeIntervalSince1970).wav")
         recordingStartTime = Date()
+        vadSpeechStarted = false
+        vadSilenceStartTime = nil
         
         guard let url = recordingURL else { return }
         
@@ -64,6 +117,8 @@ class AudioEngineManager: NSObject, ObservableObject, AVAudioPlayerDelegate, AVA
         stopMetering()
         audioRecorder?.stop()
         isRecording = false
+        vadSpeechStarted = false
+        vadSilenceStartTime = nil
         
         let duration = Date().timeIntervalSince(recordingStartTime ?? Date())
         
@@ -122,11 +177,43 @@ class AudioEngineManager: NSObject, ObservableObject, AVAudioPlayerDelegate, AVA
     
     private func startMetering() {
         levelTimer?.invalidate()
+        vadSpeechStarted = false
+        vadSilenceStartTime = nil
+        
         levelTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             guard let self = self, let recorder = self.audioRecorder, recorder.isRecording else { return }
             recorder.updateMeters()
             let power = recorder.averagePower(forChannel: 0)
             self.updateLevel(from: power)
+            
+            // Real-time Voice Activity Detection (VAD)
+            if self.isVADEnabled {
+                let level = self.audioLevel
+                let now = Date()
+                let recordingDuration = now.timeIntervalSince(self.recordingStartTime ?? now)
+                
+                // Only evaluate VAD after at least 0.3s of recording to ignore initial click noises
+                if recordingDuration > 0.3 {
+                    if level > 0.15 {
+                        // User is actively speaking
+                        self.vadSpeechStarted = true
+                        self.vadSilenceStartTime = nil
+                    } else if self.vadSpeechStarted && level < 0.07 {
+                        // User has started speaking previously and is now silent
+                        if self.vadSilenceStartTime == nil {
+                            self.vadSilenceStartTime = now
+                        } else if now.timeIntervalSince(self.vadSilenceStartTime!) >= 0.85 {
+                            // Silence sustained for >= 0.85 seconds -> End of speech!
+                            print("[AudioEngine] VAD phát hiện dứt câu (im lặng 0.85s) -> Tự động dừng thu âm và gửi!")
+                            self.vadSpeechStarted = false
+                            self.vadSilenceStartTime = nil
+                            DispatchQueue.main.async {
+                                self.onVADDetectedEndOfSpeech?()
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     

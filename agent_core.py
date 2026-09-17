@@ -2881,10 +2881,19 @@ class AntigravitySession:
         if not parts:
             parts.append({"text": "(Trống)"})
             
-        self.history.append({
-            "role": "user",
-            "parts": parts
-        })
+        # Prevent Gemini multi-turn role alternation error:
+        # If the last turn is already 'user' (caused by user barge-in / cancellation before model replied),
+        # replace the unfinished turn with this new turn instead of appending.
+        if self.history and self.history[-1].get("role") == "user":
+            self.history[-1] = {
+                "role": "user",
+                "parts": parts
+            }
+        else:
+            self.history.append({
+                "role": "user",
+                "parts": parts
+            })
         self.trim_history()
 
     def add_model_parts(self, parts: List[Dict[str, Any]]):

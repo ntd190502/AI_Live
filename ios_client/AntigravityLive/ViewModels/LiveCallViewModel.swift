@@ -17,6 +17,7 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
     @Published var isMuted: Bool = false
     @Published var isSpeakerOn: Bool = true
     @Published var audioLevel: Float = 0.0
+    @Published var isHandsFreeMode: Bool = false
     
     let audioEngine = AudioEngineManager()
     private let wsService = WebSocketService.shared
@@ -34,6 +35,15 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
             .receive(on: DispatchQueue.main)
             .assign(to: \.audioLevel, on: self)
             .store(in: &cancellables)
+            
+        // Voice Activity Detection (VAD) Callback for 1vs1 Hands-Free Mode
+        audioEngine.onVADDetectedEndOfSpeech = { [weak self] in
+            guard let self = self else { return }
+            if self.callState == .listening {
+                print("[LiveCallVM] VAD nhận diện dứt câu -> Tự động gửi thoại lên PC.")
+                self.finishTalkingAndSend()
+            }
+        }
             
         // Handle app returning to foreground
         NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
@@ -63,6 +73,24 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
         }
     }
     
+    func toggleHandsFreeMode() {
+        isHandsFreeMode.toggle()
+        audioEngine.isVADEnabled = isHandsFreeMode
+        
+        if isHandsFreeMode {
+            statusSubtitle = "Đã BẬT Đàm Thoại 1vs1 Rảnh Tay! Mở miệng là nói được ngay."
+            if callState == .idle && wsService.isConnected {
+                startTalking()
+            }
+        } else {
+            statusSubtitle = "Đã TẮT Đàm Thoại Rảnh Tay. Dùng phím bấm như bình thường."
+            if callState == .listening {
+                audioEngine.stopRecording()
+                callState = .idle
+            }
+        }
+    }
+    
     func connect() {
         callState = .disconnected
         statusSubtitle = "Đang kết nối tới PC Gateway..."
@@ -80,7 +108,7 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
     func startTalking() {
         if !wsService.isConnected {
             wsService.reconnectIfDisconnected()
-            statusSubtitle = "Đang kết nối lại PC... Hãy giữ nút và thử lại."
+            statusSubtitle = "Đang kết nối lại PC... Hãy thử lại sau giây lát."
             return
         }
         
@@ -93,20 +121,28 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
         lastTranscript = ""
         audioEngine.startRecording()
         callState = .listening
-        statusSubtitle = "Hãy nói gì đó với Antigravity..."
+        statusSubtitle = isHandsFreeMode ? "Đang lắng nghe... (Dừng nói 0.8s để tự gửi)" : "Hãy nói gì đó với Antigravity..."
     }
     
     func finishTalkingAndSend() {
         guard audioEngine.isRecording else { return }
         
-        if let audioData = audioEngine.stopRecording() {
-            callState = .thinking
-            statusSubtitle = "Đang gửi âm thanh lên PC..."
-            wsService.sendVoiceAudio(audioData: audioData, isLiveCall: true)
-        } else {
+        guard let audioData = audioEngine.stopRecording() else {
             callState = .idle
-            statusSubtitle = "Chạm quá nhanh. Hãy giữ nút để nói!"
+            statusSubtitle = "Chạm quá nhanh. Hãy nói rõ ràng hơn!"
+            return
         }
+        
+        if !wsService.isConnected {
+            callState = .disconnected
+            statusSubtitle = "Mất kết nối PC. Không thể gửi âm thanh!"
+            wsService.reconnectIfDisconnected()
+            return
+        }
+        
+        callState = .thinking
+        statusSubtitle = "Đang gửi âm thanh lên PC..."
+        wsService.sendVoiceAudio(audioData: audioData, isLiveCall: true)
     }
     
     func toggleMute() {
@@ -131,7 +167,10 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
     func webSocketDidConnect() {
         if callState != .speaking && callState != .thinking {
             callState = .idle
-            statusSubtitle = "Đã kết nối! Bấm giữ nút để nói chuyện."
+            statusSubtitle = isHandsFreeMode ? "Đã kết nối! Đang ở chế độ rảnh tay 1vs1." : "Đã kết nối! Bấm giữ nút để nói chuyện."
+            if isHandsFreeMode {
+                startTalking()
+            }
         }
     }
     
@@ -155,8 +194,20 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
         
         audioEngine.playVoiceData(audioData) { [weak self] in
             DispatchQueue.main.async {
-                self?.callState = .idle
-                self?.statusSubtitle = "Đã xong lượt thoại. Tiếp tục nói nào!"
+                guard let self = self else { return }
+                self.callState = .idle
+                
+                // If in Hands-Free 1vs1 mode, immediately open the mic for the next user turn!
+                if self.isHandsFreeMode && self.wsService.isConnected {
+                    self.statusSubtitle = "Đang đón câu nói tiếp theo của mày..."
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        if self.isHandsFreeMode && self.callState == .idle {
+                            self.startTalking()
+                        }
+                    }
+                } else {
+                    self.statusSubtitle = "Đã xong lượt thoại. Tiếp tục nói nào!"
+                }
             }
         }
     }
