@@ -34,6 +34,18 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
             .receive(on: DispatchQueue.main)
             .assign(to: \.audioLevel, on: self)
             .store(in: &cancellables)
+            
+        // Handle app returning to foreground
+        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                if !self.wsService.isConnected {
+                    self.statusSubtitle = "Đang kết nối lại PC..."
+                    self.wsService.reconnectIfDisconnected()
+                }
+            }
+            .store(in: &cancellables)
     }
     
     func onAppear() {
@@ -63,8 +75,9 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
     }
     
     func startTalking() {
-        guard wsService.isConnected else {
-            statusSubtitle = "Chưa kết nối tới PC! Kiểm tra lại IP trong Cài đặt."
+        if !wsService.isConnected {
+            wsService.reconnectIfDisconnected()
+            statusSubtitle = "Đang kết nối lại PC... Hãy giữ nút và thử lại."
             return
         }
         

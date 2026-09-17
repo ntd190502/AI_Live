@@ -29,6 +29,23 @@ class WebSocketService: NSObject, URLSessionWebSocketDelegate {
         config.timeoutIntervalForResource = 600.0
         config.waitsForConnectivity = true
         self.urlSession = URLSession(configuration: config, delegate: self, delegateQueue: OperationQueue())
+        
+        // Auto reconnect whenever user brings the app back to foreground
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    @objc private func handleAppWillEnterForeground() {
+        print("[WebSocket] App quay lại Foreground -> Tự động kết nối lại WebSocket tức thì...")
+        reconnect()
     }
     
     func addListener(_ listener: WebSocketServiceDelegate) {
@@ -66,6 +83,17 @@ class WebSocketService: NSObject, URLSessionWebSocketDelegate {
         
         listenForMessages()
         startHeartbeat()
+    }
+    
+    func reconnect() {
+        disconnect()
+        connect()
+    }
+    
+    func reconnectIfDisconnected() {
+        if !isConnected || webSocketTask == nil {
+            reconnect()
+        }
     }
     
     func disconnect() {
@@ -147,6 +175,16 @@ class WebSocketService: NSObject, URLSessionWebSocketDelegate {
                 DispatchQueue.main.async {
                     self.isConnected = false
                     self.notifyListeners { $0.webSocketDidDisconnect(error: error) }
+                    
+                    // Auto-retry reconnect if user is still actively using the app
+                    if UIApplication.shared.applicationState == .active {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                            if let self = self, !self.isConnected {
+                                print("[WebSocket] Tự động thử kết nối lại sau lỗi socket...")
+                                self.connect()
+                            }
+                        }
+                    }
                 }
             case .success(let message):
                 switch message {

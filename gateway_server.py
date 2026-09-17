@@ -237,20 +237,17 @@ async def websocket_live_endpoint(websocket: WebSocket):
                 is_live_call=is_live_call
             ):
                 if event_type == "status":
-                    if not await safe_send_json(websocket, {"type": "status", "text": str(data)}):
-                        return
+                    await safe_send_json(websocket, {"type": "status", "text": str(data)})
                 elif event_type == "text":
                     accumulated_text.append(data)
-                    if not await safe_send_json(websocket, {"type": "text_delta", "delta": data}):
-                        return
+                    await safe_send_json(websocket, {"type": "text_delta", "delta": data})
                 elif event_type == "tool_output":
                     logger.info(f"Tool executed: {data.get('tool')}")
-                    if not await safe_send_json(websocket, {
+                    await safe_send_json(websocket, {
                         "type": "tool_executed",
                         "tool": data.get("tool"),
                         "output": str(data.get("output"))[:1000]
-                    }):
-                        return
+                    })
                 elif event_type == "send_file":
                     f_path = data.get("path")
                     caption = data.get("caption", "")
@@ -258,12 +255,11 @@ async def websocket_live_endpoint(websocket: WebSocket):
                         try:
                             with open(f_path, "rb") as f:
                                 img_b64 = base64.b64encode(f.read()).decode("utf-8")
-                            if not await safe_send_json(websocket, {
+                            await safe_send_json(websocket, {
                                 "type": "screenshot",
                                 "image_b64": img_b64,
                                 "caption": caption
-                            }):
-                                return
+                            })
                         except Exception as fe:
                             logger.warning(f"Lỗi đọc file gửi: {fe}")
                 elif event_type == "error":
@@ -369,14 +365,14 @@ async def websocket_live_endpoint(websocket: WebSocket):
                 current_turn_task = asyncio.create_task(process_user_turn(session, is_live_call))
 
     except WebSocketDisconnect:
-        logger.info("iOS Client đã ngắt kết nối WebSocket.")
+        logger.info("iOS Client đã ngắt kết nối WebSocket (hoặc ẩn app).")
     except Exception as e:
         logger.error(f"WebSocket Exception: {e}", exc_info=True)
     finally:
         keepalive_active = False
         heartbeat_task.cancel()
         if current_turn_task and not current_turn_task.done():
-            current_turn_task.cancel()
+            logger.info("Client tạm ngắt socket, AI trên PC vẫn tiếp tục chạy độc lập trong nền cho xong nhiệm vụ.")
 
 if __name__ == "__main__":
     import argparse
