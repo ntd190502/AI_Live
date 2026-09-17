@@ -139,7 +139,8 @@ async def chat_api(req: ChatRequest):
         async for event_type, data in run_agent_turn(
             session=session,
             model_name=req.model_name,
-            thinking_level=req.thinking_level
+            thinking_level=req.thinking_level,
+            is_live_call=req.want_voice
         ):
             if event_type == "text":
                 accumulated_text.append(data)
@@ -191,7 +192,8 @@ async def websocket_live_endpoint(websocket: WebSocket):
     
     Incoming Messages (JSON):
       - {"type": "chat_text", "session_id": "...", "text": "..."}
-      - {"type": "voice_audio", "session_id": "...", "audio_b64": "...", "mime": "audio/wav"}
+      - {"type": "voice_audio", "session_id": "...", "audio_b64": "...", "mime": "audio/wav", "live_call": true}
+      - {"type": "cancel"} / {"type": "interrupt"}
       - {"type": "ping"}
       - {"type": "reset", "session_id": "..."}
       
@@ -203,9 +205,106 @@ async def websocket_live_endpoint(websocket: WebSocket):
       - {"type": "screenshot", "image_b64": "...", "caption": "..."}
       - {"type": "turn_complete", "full_text": "..."}
       - {"type": "error", "message": "..."}
+      - {"type": "pong", "time": ...}
     """
     await websocket.accept()
     logger.info("iOS Client đã kết nối vào WebSocket /ws/live!")
+
+    current_turn_task: Optional[asyncio.Task] = None
+    keepalive_active = True
+
+    async def heartbeat_worker():
+        while keepalive_active:
+            try:
+                await asyncio.sleep(3.0)
+                if keepalive_active:
+                    await safe_send_json(websocket, {"type": "ping"})
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                break
+
+    heartbeat_task = asyncio.create_task(heartbeat_worker())
+
+    async def process_user_turn(session: AntigravitySession, is_live_call: bool):
+        accumulated_text = []
+        turn_start = time.time()
+        try:
+            async for event_type, data in run_agent_turn(
+                session=session,
+                model_name="gemini-3.8-flash-tiered",
+                thinking_level="low",
+                is_live_call=is_live_call
+            ):
+                if event_type == "status":
+                    if not await safe_send_json(websocket, {"type": "status", "text": str(data)}):
+                        return
+                elif event_type == "text":
+                    accumulated_text.append(data)
+                    if not await safe_send_json(websocket, {"type": "text_delta", "delta": data}):
+                        return
+                elif event_type == "tool_output":
+                    logger.info(f"Tool executed: {data.get('tool')}")
+                    if not await safe_send_json(websocket, {
+                        "type": "tool_executed",
+                        "tool": data.get("tool"),
+                        "output": str(data.get("output"))[:1000]
+                    }):
+                        return
+                elif event_type == "send_file":
+                    f_path = data.get("path")
+                    caption = data.get("caption", "")
+                    if f_path and Path(f_path).exists():
+                        try:
+                            with open(f_path, "rb") as f:
+                                img_b64 = base64.b64encode(f.read()).decode("utf-8")
+                            if not await safe_send_json(websocket, {
+                                "type": "screenshot",
+                                "image_b64": img_b64,
+                                "caption": caption
+                            }):
+                                return
+                        except Exception as fe:
+                            logger.warning(f"Lỗi đọc file gửi: {fe}")
+                elif event_type == "error":
+                    logger.error(f"Agent error event: {data}")
+                    await safe_send_json(websocket, {"type": "error", "message": str(data)})
+                    return
+
+            final_full_text = "".join(accumulated_text).strip()
+            turn_elapsed = time.time() - turn_start
+            logger.info(f"AI hoàn thành câu trả lời ({len(final_full_text)} ký tự, {turn_elapsed:.2f}s): '{final_full_text[:60]}...'")
+
+            # Synthesize Hoài My voice for Live Calls
+            if is_live_call and final_full_text:
+                await safe_send_json(websocket, {"type": "status", "text": "Đang phát giọng nói Hoài My..."})
+                try:
+                    tts_start = time.time()
+                    voice_path = await generate_vietnamese_voice(final_full_text)
+                    if voice_path and voice_path.exists():
+                        with open(voice_path, "rb") as vf:
+                            v_b64 = base64.b64encode(vf.read()).decode("utf-8")
+                        tts_elapsed = time.time() - tts_start
+                        logger.info(f"Sinh voice TTS xong trong {tts_elapsed:.2f}s. Đang đẩy về iPhone...")
+                        await safe_send_json(websocket, {
+                            "type": "voice_chunk",
+                            "audio_b64": v_b64,
+                            "mime": "audio/mp3",
+                            "full_text": final_full_text
+                        })
+                except Exception as ve:
+                    logger.error(f"Lỗi tạo voice TTS: {ve}")
+
+            await safe_send_json(websocket, {
+                "type": "turn_complete",
+                "full_text": final_full_text
+            })
+
+        except asyncio.CancelledError:
+            logger.info("Lượt xử lý AI bị ngắt bởi người dùng (Barge-in / Cancel).")
+        except Exception as ex:
+            logger.error(f"Lỗi trong quá trình xử lý agent turn: {ex}", exc_info=True)
+            await safe_send_json(websocket, {"type": "error", "message": f"Lỗi Agent: {str(ex)}"})
 
     try:
         while True:
@@ -224,20 +323,35 @@ async def websocket_live_endpoint(websocket: WebSocket):
                 await websocket.send_json({"type": "pong", "time": time.time()})
                 continue
 
+            elif msg_type in ("cancel", "interrupt"):
+                if current_turn_task and not current_turn_task.done():
+                    current_turn_task.cancel()
+                    current_turn_task = None
+                await safe_send_json(websocket, {"type": "status", "text": "Đã ngắt lời Antigravity."})
+                await safe_send_json(websocket, {"type": "turn_complete", "full_text": ""})
+                continue
+
             elif msg_type == "reset":
+                if current_turn_task and not current_turn_task.done():
+                    current_turn_task.cancel()
+                    current_turn_task = None
                 session.history.clear()
                 session.title = "Phiên mới"
                 await websocket.send_json({"type": "status", "text": "Đã làm mới phiên trò chuyện."})
                 continue
 
             elif msg_type in ("chat_text", "voice_audio"):
+                # If a previous turn is still computing, cancel it to support immediate barge-in / interruption
+                if current_turn_task and not current_turn_task.done():
+                    logger.info("Người dùng nói câu mới khi AI đang bận -> Hủy lượt cũ ngay lập tức (Barge-in).")
+                    current_turn_task.cancel()
+                    current_turn_task = None
+
                 user_text = msg.get("text", "")
                 audio_b64 = msg.get("audio_b64")
                 audio_mime = msg.get("mime", "audio/wav")
                 image_b64 = msg.get("image_b64")
                 mime_type = msg.get("image_mime", "image/jpeg")
-
-                # In Live Call mode, default to generating voice response
                 is_live_call = (msg_type == "voice_audio") or msg.get("live_call", True)
 
                 logger.info(f"Nhận yêu cầu: type={msg_type}, text='{user_text[:50]}', audio={bool(audio_b64)}, live_call={is_live_call}")
@@ -249,120 +363,20 @@ async def websocket_live_endpoint(websocket: WebSocket):
                     audio_b64=audio_b64,
                     audio_mime=audio_mime
                 )
-                if not await safe_send_json(websocket, {"type": "status", "text": "Antigravity đang xử lý..."}):
-                    break
+                await safe_send_json(websocket, {"type": "status", "text": "Antigravity đang lắng nghe và suy nghĩ..."})
 
-                accumulated_text = []
-                client_disconnected = False
-                turn_start = time.time()
-                
-                # Keepalive heartbeat to prevent iOS URLSession 30s timeout
-                keepalive_active = True
-                async def heartbeat_worker():
-                    while keepalive_active:
-                        try:
-                            await asyncio.sleep(2.0)
-                            if keepalive_active:
-                                await safe_send_json(websocket, {"type": "ping"})
-                        except Exception:
-                            break
-
-                heartbeat_task = asyncio.create_task(heartbeat_worker())
-                try:
-                    async for event_type, data in run_agent_turn(
-                        session=session,
-                        model_name="gemini-3.8-flash-tiered",
-                        thinking_level="low"
-                    ):
-                        if event_type == "status":
-                            if not await safe_send_json(websocket, {"type": "status", "text": str(data)}):
-                                client_disconnected = True
-                                break
-                        elif event_type == "text":
-                            accumulated_text.append(data)
-                            if not await safe_send_json(websocket, {"type": "text_delta", "delta": data}):
-                                client_disconnected = True
-                                break
-                        elif event_type == "tool_output":
-                            logger.info(f"Tool executed: {data.get('tool')}")
-                            if not await safe_send_json(websocket, {
-                                "type": "tool_executed",
-                                "tool": data.get("tool"),
-                                "output": str(data.get("output"))[:1000]
-                            }):
-                                client_disconnected = True
-                                break
-                        elif event_type == "send_file":
-                            f_path = data.get("path")
-                            caption = data.get("caption", "")
-                            if f_path and Path(f_path).exists():
-                                try:
-                                    with open(f_path, "rb") as f:
-                                        img_b64 = base64.b64encode(f.read()).decode("utf-8")
-                                    if not await safe_send_json(websocket, {
-                                        "type": "screenshot",
-                                        "image_b64": img_b64,
-                                        "caption": caption
-                                    }):
-                                        client_disconnected = True
-                                        break
-                                except Exception as fe:
-                                    logger.warning(f"Lỗi đọc file gửi: {fe}")
-                        elif event_type == "error":
-                            logger.error(f"Agent error event: {data}")
-                            await safe_send_json(websocket, {"type": "error", "message": str(data)})
-                            client_disconnected = True
-                            break
-
-                    if client_disconnected:
-                        logger.info("iOS Client đã ngắt kết nối giữa chừng, dừng lượt xử lý.")
-                        break
-
-                    final_full_text = "".join(accumulated_text).strip()
-                    turn_elapsed = time.time() - turn_start
-                    logger.info(f"AI hoàn thành câu trả lời ({len(final_full_text)} ký tự, {turn_elapsed:.2f}s): '{final_full_text[:60]}...'")
-
-                    # In Live Mode, synthesize Hoài My Voice and push to iOS
-                    if is_live_call and final_full_text:
-                        await safe_send_json(websocket, {"type": "status", "text": "Đang phát giọng nói Hoài My..."})
-                        try:
-                            tts_start = time.time()
-                            voice_path = await generate_vietnamese_voice(final_full_text)
-                            if voice_path and voice_path.exists():
-                                with open(voice_path, "rb") as vf:
-                                    v_b64 = base64.b64encode(vf.read()).decode("utf-8")
-                                tts_elapsed = time.time() - tts_start
-                                logger.info(f"Sinh voice TTS xong trong {tts_elapsed:.2f}s ({len(v_b64)} b64 chars). Đang đẩy về iPhone...")
-                                await safe_send_json(websocket, {
-                                    "type": "voice_chunk",
-                                    "audio_b64": v_b64,
-                                    "mime": "audio/mp3",
-                                    "full_text": final_full_text
-                                })
-                        except Exception as ve:
-                            logger.error(f"Lỗi tạo voice TTS: {ve}")
-
-                    await safe_send_json(websocket, {
-                        "type": "turn_complete",
-                        "full_text": final_full_text
-                    })
-                    logger.info("Hoàn tất gửi toàn bộ kết quả về cho iOS Client.")
-
-                except (WebSocketDisconnect, RuntimeError):
-                    logger.info("iOS Client đã ngắt kết nối WebSocket.")
-                    break
-                except Exception as ex:
-                    logger.error(f"Lỗi trong quá trình xử lý agent turn: {ex}", exc_info=True)
-                    await safe_send_json(websocket, {"type": "error", "message": f"Lỗi Agent: {str(ex)}"})
-                    break
-                finally:
-                    keepalive_active = False
-                    heartbeat_task.cancel()
+                # Spawn agent turn as independent asyncio Task to keep receive_text loop active
+                current_turn_task = asyncio.create_task(process_user_turn(session, is_live_call))
 
     except WebSocketDisconnect:
         logger.info("iOS Client đã ngắt kết nối WebSocket.")
     except Exception as e:
         logger.error(f"WebSocket Exception: {e}", exc_info=True)
+    finally:
+        keepalive_active = False
+        heartbeat_task.cancel()
+        if current_turn_task and not current_turn_task.done():
+            current_turn_task.cancel()
 
 if __name__ == "__main__":
     import argparse

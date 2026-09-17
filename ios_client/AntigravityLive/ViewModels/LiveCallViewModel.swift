@@ -68,7 +68,12 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
             return
         }
         
-        audioEngine.stopPlayback()
+        // If AI is currently speaking or thinking, interrupt immediately (Barge-in)
+        if audioEngine.isPlaying || callState == .speaking || callState == .thinking {
+            audioEngine.stopPlayback()
+            wsService.cancelCurrentTurn()
+        }
+        
         audioEngine.startRecording()
         callState = .listening
         statusSubtitle = "Hãy nói gì đó với Antigravity..."
@@ -83,7 +88,7 @@ class LiveCallViewModel: ObservableObject, WebSocketServiceDelegate {
             wsService.sendVoiceAudio(audioData: audioData, isLiveCall: true)
         } else {
             callState = .idle
-            statusSubtitle = "Không thu được âm thanh."
+            statusSubtitle = "Chạm quá nhanh. Hãy giữ nút để nói!"
         }
     }
     

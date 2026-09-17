@@ -26,9 +26,12 @@ class AudioEngineManager: NSObject, ObservableObject, AVAudioPlayerDelegate, AVA
         }
     }
     
+    private var recordingStartTime: Date?
+    
     func startRecording() {
         let tempDir = FileManager.default.temporaryDirectory
         recordingURL = tempDir.appendingPathComponent("live_input_\(Date().timeIntervalSince1970).wav")
+        recordingStartTime = Date()
         
         guard let url = recordingURL else { return }
         
@@ -61,13 +64,23 @@ class AudioEngineManager: NSObject, ObservableObject, AVAudioPlayerDelegate, AVA
         audioRecorder?.stop()
         isRecording = false
         
+        let duration = Date().timeIntervalSince(recordingStartTime ?? Date())
+        
         guard let url = recordingURL, FileManager.default.fileExists(atPath: url.path) else {
             return nil
         }
         
+        defer {
+            try? FileManager.default.removeItem(at: url)
+        }
+        
         do {
             let data = try Data(contentsOf: url)
-            try? FileManager.default.removeItem(at: url)
+            // Guardrail: Ignore accidental brief taps or tiny audio packets (< 0.4s or < 2KB)
+            if duration < 0.4 || data.count < 2048 {
+                print("[AudioEngine] Ignored short/empty recording: \(duration)s, \(data.count) bytes")
+                return nil
+            }
             return data
         } catch {
             print("[AudioEngine] Error reading recorded data: \(error)")

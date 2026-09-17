@@ -111,6 +111,13 @@ class WebSocketService: NSObject, URLSessionWebSocketDelegate {
         sendJSON(payload)
     }
     
+    func cancelCurrentTurn() {
+        let payload: [String: Any] = [
+            "type": "cancel"
+        ]
+        sendJSON(payload)
+    }
+    
     func resetSession(sessionId: String = AppConfig.sessionId) {
         let payload: [String: Any] = [
             "type": "reset",

@@ -1186,23 +1186,47 @@ def perform_smart_pc_control(action: str, target: Optional[str] = None) -> str:
 VOICE_CACHE_DIR = BASE_DIR / "voice_cache"
 VOICE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+def cleanup_voice_cache(max_age_seconds: int = 3600):
+    """Automatically cleans up cached MP3 voice files older than max_age_seconds (default 1 hour)."""
+    try:
+        now = time.time()
+        for p in VOICE_CACHE_DIR.glob("*.mp3"):
+            if p.is_file() and (now - p.stat().st_mtime > max_age_seconds):
+                p.unlink(missing_ok=True)
+    except Exception as e:
+        logging.warning(f"Lỗi khi dọn dẹp voice cache: {e}")
+
 def clean_text_for_speech(text: str) -> str:
-    """Cleans markdown syntax, URLs, and command blocks for natural speech."""
+    """Cleans markdown syntax, raw URLs, system paths, and command blocks for natural speech."""
     import re
+    # Strip code blocks
     text = re.sub(r"```[\s\S]*?```", "Mã lệnh đính kèm.", text)
+    # Strip raw URLs (https://... or http://...)
+    text = re.sub(r"https?://\S+", "", text)
+    # Strip markdown links [text](url) -> text
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    # Strip inline code and emphasis
     text = re.sub(r"`([^`]+)`", r"\1", text)
     text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
     text = re.sub(r"\*([^*]+)\*", r"\1", text)
-    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    # Strip headers, tables, bullet points
     text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"\|[\s\-:|]+\|", "", text)
     text = re.sub(r"^[•\-\*]\s+", "", text, flags=re.MULTILINE)
+    # Strip local Windows drive paths (e.g. C:\... or D:\...)
+    text = re.sub(r"[a-zA-Z]:\\[^\s]+", "", text)
+    # Clean multiple newlines and spaces
     text = re.sub(r"\n{2,}", ". ", text)
     text = re.sub(r"\s{2,}", " ", text)
+    # Remove any leftover stray markdown symbols
+    text = re.sub(r"[*#_~`>]", "", text)
     return text.strip()
 
 async def generate_vietnamese_voice(text: str, voice: str = "vi-VN-HoaiMyNeural") -> Optional[Path]:
-    """Generates an mp3 voice audio file using Microsoft Hoai My Neural TTS."""
+    """Generates an mp3 voice audio file using Microsoft Hoai My Neural TTS with auto-cleanup."""
+    # Proactively clean expired voice caches
+    cleanup_voice_cache(max_age_seconds=3600)
+
     clean_txt = clean_text_for_speech(text)
     if not clean_txt:
         return None
@@ -2950,7 +2974,8 @@ def match_fast_path_tool(text: str) -> Tuple[Optional[str], Optional[Dict[str, A
 async def run_agent_turn(
     session: AntigravitySession,
     model_name: str = "gemini-3.8-flash-tiered",
-    thinking_level: str = "medium"
+    thinking_level: str = "medium",
+    is_live_call: bool = False
 ) -> AsyncGenerator[Tuple[str, Any], None]:
     """Runs an autonomous turn with the Antigravity API and tool execution loop."""
     session.prune_and_compact(max_turns=20)
@@ -2964,6 +2989,9 @@ async def run_agent_turn(
     max_steps = 15
     step = 0
     budget = THINKING_BUDGET_MAP.get(thinking_level, 16384)
+    if is_live_call:
+        budget = min(budget, 2048)
+        thinking_level = "low"
     has_generated_text = False
 
     # Fast-Path Check on the initial user turn
@@ -3007,13 +3035,23 @@ async def run_agent_turn(
                 last_parts[0]["text"] = augmented_prompt
                 
                 # Fast-path optimization: use low thinking budget so Gemini responds in ~2-3 seconds
-                budget = min(budget, 4096)
+                budget = min(budget, 2048 if is_live_call else 4096)
                 thinking_level = "low"
     
     while step < max_steps:
         step += 1
         yield ("status", f"⏳ Antigravity ({model_name} | {thinking_level.upper()}) đang suy nghĩ...")
         
+        sys_inst = get_dynamic_system_instruction()
+        if is_live_call:
+            sys_inst += (
+                "\n\n[CHỈ THỊ ĐẶC BIỆT CHO CHẾ ĐỘ LIVE VOICE CALL TRỰC TIẾP]:\n"
+                "Mày đang đàm thoại trực tiếp qua Voice Call với người dùng. "
+                "BẮT BUỘC: Trả lời cực kỳ ngắn gọn, súc tích (chỉ 1-2 câu khẩu ngữ tự nhiên, đanh thép, cà khịa dứt khoát). "
+                "TUYỆT ĐỐI KHÔNG dùng markdown (không in đậm, không bullet point, không table), KHÔNG đọc đường dẫn URL hay mã lệnh, KHÔNG liệt kê dài dòng. "
+                "Trả lời ngay để giọng đọc phát ra lập tức."
+            )
+
         request_data = {
             "model": model_name,
             "project": project_id,
@@ -3021,7 +3059,7 @@ async def run_agent_turn(
                 "contents": session.history,
                 "systemInstruction": {
                     "role": "system",
-                    "parts": [{"text": get_dynamic_system_instruction()}]
+                    "parts": [{"text": sys_inst}]
                 },
                 "tools": AGENT_TOOLS,
                 "generationConfig": {
